@@ -33,7 +33,7 @@ export async function GET() {
         id: row.visitId,
         rating: row.rating,
         note: row.note,
-        visitedAt: row.visitedAt.toISOString(),
+        visitedAt: row.visitedAt?.toISOString() ?? null,
       });
     }
   }
