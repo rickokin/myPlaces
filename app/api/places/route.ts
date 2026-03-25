@@ -23,7 +23,7 @@ export async function GET() {
     .leftJoin(placeVisits, eq(placeVisits.savedPlaceId, savedPlaces.id))
     .where(eq(savedPlaces.userId, userId));
 
-  const placesMap = new Map<string, { name: string; visits: { id: string; rating: number | null; note: string | null; visitedAt: string }[] }>();
+  const placesMap = new Map<string, { name: string; visits: { id: string; rating: number | null; note: string | null; visitedAt: string | null }[] }>();
   for (const row of rows) {
     if (!placesMap.has(row.placeId)) {
       placesMap.set(row.placeId, { name: row.name, visits: [] });
