@@ -21,11 +21,32 @@ export interface PlaceResult {
     open_now?: boolean;
   };
   distance?: number;
+  city?: string;
+  state?: string;
+  country?: string;
+}
+
+interface AddressComponent {
+  types: string[];
+  short_name: string;
+  long_name: string;
 }
 
 interface PlaceDetailsResult {
   formatted_phone_number?: string;
   website?: string;
+  address_components?: AddressComponent[];
+}
+
+function parseLocation(components: AddressComponent[]): { city?: string; state?: string; country?: string } {
+  const get = (type: string, nameKey: "short_name" | "long_name" = "long_name") =>
+    components.find((c) => c.types.includes(type))?.[nameKey];
+
+  return {
+    city: get("locality") || get("postal_town") || get("sublocality_level_1"),
+    state: get("administrative_area_level_1"),
+    country: get("country"),
+  };
 }
 
 async function getPlaceDetails(placeId: string): Promise<PlaceDetailsResult> {
@@ -33,7 +54,7 @@ async function getPlaceDetails(placeId: string): Promise<PlaceDetailsResult> {
     "https://maps.googleapis.com/maps/api/place/details/json"
   );
   url.searchParams.set("place_id", placeId);
-  url.searchParams.set("fields", "formatted_phone_number,website");
+  url.searchParams.set("fields", "formatted_phone_number,website,address_components");
   url.searchParams.set("key", GOOGLE_MAPS_API_KEY!);
 
   const res = await fetch(url.toString());
@@ -112,11 +133,15 @@ export async function GET(request: NextRequest) {
           place.geometry.location.lat,
           place.geometry.location.lng
         );
+        const location = details.address_components
+          ? parseLocation(details.address_components)
+          : {};
         return {
           ...place,
           formatted_phone_number: details.formatted_phone_number,
           website: details.website,
           distance,
+          ...location,
         };
       })
     );

@@ -5,9 +5,23 @@ import { SignInButton, SignUpButton, UserButton, Show, useUser } from "@clerk/ne
 import { PlaceResult } from "./api/restaurants/route";
 import RestaurantCard from "@/components/RestaurantCard";
 import LocationError from "@/components/LocationError";
+import SavedPlacesTab from "@/components/SavedPlacesTab";
+import SearchTab from "@/components/SearchTab";
+import NearbyMap from "@/components/NearbyMap";
 import { Visit } from "@/types";
 
 type Status = "idle" | "locating" | "loading" | "success" | "error";
+type ActiveTab = "nearby" | "saved" | "search";
+type NearbyView = "list" | "map";
+
+export type SavedPlaceEntry = {
+  name: string;
+  vicinity: string | null;
+  city: string | null;
+  state: string | null;
+  country: string | null;
+  visits: Visit[];
+};
 
 const DEFAULT_RADIUS_FT = 300;
 
@@ -18,10 +32,15 @@ export default function HomeClient() {
   const [errorMessage, setErrorMessage] = useState<string>("");
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [currentAddress, setCurrentAddress] = useState<string | null>(null);
+  const [isEditingAddress, setIsEditingAddress] = useState(false);
+  const [addressInput, setAddressInput] = useState("");
+  const [addressSearchError, setAddressSearchError] = useState<string | null>(null);
   const [radiusFt, setRadiusFt] = useState<number>(DEFAULT_RADIUS_FT);
   const [radiusInput, setRadiusInput] = useState<string>(String(DEFAULT_RADIUS_FT));
-  // Map of placeId -> visits array; presence in map means the place is saved
-  const [savedPlacesData, setSavedPlacesData] = useState<Map<string, Visit[]>>(new Map());
+  // Map of placeId -> entry; presence in map means the place is saved
+  const [savedPlacesData, setSavedPlacesData] = useState<Map<string, SavedPlaceEntry>>(new Map());
+  const [activeTab, setActiveTab] = useState<ActiveTab>("nearby");
+  const [nearbyView, setNearbyView] = useState<NearbyView>("list");
   const radiusFtRef = useRef<number>(DEFAULT_RADIUS_FT);
 
   const fetchRestaurants = useCallback(
@@ -58,11 +77,26 @@ export default function HomeClient() {
       const res = await fetch("/api/places");
       if (!res.ok) return;
       const data = await res.json() as {
-        savedPlaces: { placeId: string; name: string; visits: Visit[] }[];
+        savedPlaces: {
+          placeId: string;
+          name: string;
+          vicinity: string | null;
+          city: string | null;
+          state: string | null;
+          country: string | null;
+          visits: Visit[];
+        }[];
       };
-      const map = new Map<string, Visit[]>();
+      const map = new Map<string, SavedPlaceEntry>();
       for (const p of data.savedPlaces) {
-        map.set(p.placeId, p.visits);
+        map.set(p.placeId, {
+          name: p.name,
+          vicinity: p.vicinity,
+          city: p.city,
+          state: p.state,
+          country: p.country,
+          visits: p.visits,
+        });
       }
       setSavedPlacesData(map);
     } catch {
@@ -75,15 +109,26 @@ export default function HomeClient() {
     else setSavedPlacesData(new Map());
   }, [isSignedIn, fetchSavedPlaces]);
 
-  const handleSaveToggle = useCallback(async (placeId: string, save: boolean) => {
-    const restaurant = restaurants.find((r) => r.place_id === placeId);
+  const handleSaveToggle = useCallback(async (
+    placeId: string,
+    save: boolean,
+    restaurantOverride?: PlaceResult
+  ) => {
+    const restaurant = restaurantOverride ?? restaurants.find((r) => r.place_id === placeId);
     if (!restaurant) return;
 
     // Optimistic update
     setSavedPlacesData((prev) => {
       const next = new Map(prev);
       if (save) {
-        next.set(placeId, []);
+        next.set(placeId, {
+          name: restaurant.name,
+          vicinity: restaurant.vicinity ?? null,
+          city: restaurant.city ?? null,
+          state: restaurant.state ?? null,
+          country: restaurant.country ?? null,
+          visits: [],
+        });
       } else {
         next.delete(placeId);
       }
@@ -95,7 +140,14 @@ export default function HomeClient() {
         await fetch("/api/places", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ placeId, name: restaurant.name, vicinity: restaurant.vicinity }),
+          body: JSON.stringify({
+            placeId,
+            name: restaurant.name,
+            vicinity: restaurant.vicinity,
+            city: restaurant.city,
+            state: restaurant.state,
+            country: restaurant.country,
+          }),
         });
       } else {
         await fetch(`/api/places?placeId=${encodeURIComponent(placeId)}`, { method: "DELETE" });
@@ -104,8 +156,18 @@ export default function HomeClient() {
       // Revert optimistic update on failure
       setSavedPlacesData((prev) => {
         const next = new Map(prev);
-        if (save) next.delete(placeId);
-        else next.set(placeId, []);
+        if (save) {
+          next.delete(placeId);
+        } else {
+          next.set(placeId, {
+            name: restaurant.name,
+            vicinity: restaurant.vicinity ?? null,
+            city: restaurant.city ?? null,
+            state: restaurant.state ?? null,
+            country: restaurant.country ?? null,
+            visits: [],
+          });
+        }
         return next;
       });
     }
@@ -128,8 +190,10 @@ export default function HomeClient() {
     const { visit } = await res.json() as { visit: Visit };
     setSavedPlacesData((prev) => {
       const next = new Map(prev);
-      const existing = next.get(placeId) ?? [];
-      next.set(placeId, [...existing, visit]);
+      const existing = next.get(placeId);
+      if (existing) {
+        next.set(placeId, { ...existing, visits: [...existing.visits, visit] });
+      }
       return next;
     });
     return visit;
@@ -139,8 +203,10 @@ export default function HomeClient() {
     // Optimistic update
     setSavedPlacesData((prev) => {
       const next = new Map(prev);
-      const existing = next.get(placeId) ?? [];
-      next.set(placeId, existing.filter((v) => v.id !== visitId));
+      const existing = next.get(placeId);
+      if (existing) {
+        next.set(placeId, { ...existing, visits: existing.visits.filter((v) => v.id !== visitId) });
+      }
       return next;
     });
 
@@ -190,6 +256,30 @@ export default function HomeClient() {
     getLocation();
   }, [getLocation]);
 
+  const handleAddressSearch = useCallback(async () => {
+    const trimmed = addressInput.trim();
+    if (!trimmed) return;
+    setAddressSearchError(null);
+    setStatus("loading");
+    try {
+      const res = await fetch(`/api/geocode?address=${encodeURIComponent(trimmed)}`);
+      const data = await res.json();
+      if (!res.ok) {
+        setAddressSearchError(data.error ?? "Address not found");
+        setStatus(coords ? "success" : "error");
+        return;
+      }
+      const { lat, lng, address } = data as { lat: number; lng: number; address: string };
+      setCoords({ lat, lng });
+      setCurrentAddress(address || trimmed);
+      setIsEditingAddress(false);
+      fetchRestaurants(lat, lng, radiusFtRef.current);
+    } catch {
+      setAddressSearchError("Failed to find that address. Please try again.");
+      setStatus(coords ? "success" : "error");
+    }
+  }, [addressInput, coords, fetchRestaurants]);
+
   const handleSearch = useCallback(() => {
     const parsed = parseInt(radiusInput, 10);
     if (isNaN(parsed) || parsed < 1) return;
@@ -215,7 +305,7 @@ export default function HomeClient() {
             <h1 className="text-xl font-bold text-gray-900">Nearby Eats</h1>
           </div>
           <div className="flex items-center gap-3">
-            {(status === "success" || status === "error") && (
+            {activeTab === "nearby" && (status === "success" || status === "error") && (
               <button
                 onClick={getLocation}
                 className="flex items-center gap-1.5 text-sm font-medium text-blue-600 hover:text-blue-800 transition-colors"
@@ -241,104 +331,258 @@ export default function HomeClient() {
             </Show>
           </div>
         </div>
-        {coords && (status === "success" || status === "loading") && (
-          <div className="max-w-2xl mx-auto px-4 pb-2 flex items-center gap-1.5">
-            <PinIcon />
-            {currentAddress ? (
-              <p className="text-xs text-gray-600 font-medium">{currentAddress}</p>
+        {activeTab === "nearby" && coords && (status === "success" || status === "loading") && (
+          <div className="max-w-2xl mx-auto px-4 pb-2">
+            {isEditingAddress ? (
+              <div className="flex flex-col gap-1.5">
+                <div className="flex items-center gap-1.5">
+                  <PinIcon />
+                  <input
+                    autoFocus
+                    type="text"
+                    value={addressInput}
+                    onChange={(e) => { setAddressInput(e.target.value); setAddressSearchError(null); }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") handleAddressSearch();
+                      if (e.key === "Escape") { setIsEditingAddress(false); setAddressSearchError(null); }
+                    }}
+                    placeholder="Enter an address or place…"
+                    className="flex-1 text-xs border border-gray-300 rounded-md px-2 py-1 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  <button
+                    onClick={handleAddressSearch}
+                    disabled={!addressInput.trim()}
+                    className="text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-md px-2.5 py-1 transition-colors cursor-pointer disabled:cursor-not-allowed"
+                  >
+                    Go
+                  </button>
+                  <button
+                    onClick={() => { setIsEditingAddress(false); setAddressSearchError(null); }}
+                    className="text-xs font-medium text-gray-500 hover:text-gray-700 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+                <div className="flex items-center gap-2 pl-5">
+                  {addressSearchError && (
+                    <p className="text-xs text-red-500">{addressSearchError}</p>
+                  )}
+                  <button
+                    onClick={() => { setIsEditingAddress(false); setAddressSearchError(null); getLocation(); }}
+                    className="text-xs text-blue-500 hover:text-blue-700 transition-colors"
+                  >
+                    Use my current location
+                  </button>
+                </div>
+              </div>
             ) : (
-              <p className="text-xs text-gray-400 italic">Determining address…</p>
+              <button
+                onClick={() => { setAddressInput(currentAddress ?? ""); setAddressSearchError(null); setIsEditingAddress(true); }}
+                className="flex items-center gap-1.5 group w-full text-left"
+                title="Change location"
+              >
+                <PinIcon />
+                {currentAddress ? (
+                  <span className="text-xs text-gray-600 font-medium group-hover:text-blue-600 transition-colors">
+                    {currentAddress}
+                  </span>
+                ) : (
+                  <span className="text-xs text-gray-400 italic">Determining address…</span>
+                )}
+                <EditIcon />
+              </button>
             )}
           </div>
         )}
-      </header>
 
-      <main className="max-w-2xl mx-auto px-4 py-6">
-        {/* Radius control */}
-        <div className="flex items-center gap-2 mb-5 bg-white rounded-lg border border-gray-200 p-3 shadow-sm">
-          <label
-            htmlFor="radius-input"
-            className="text-sm font-medium text-gray-700 shrink-0"
-          >
-            Search radius:
-          </label>
-          <div className="flex items-center gap-1.5 flex-1">
-            <input
-              id="radius-input"
-              type="number"
-              min="50"
-              max="26400"
-              step="50"
-              value={radiusInput}
-              onChange={(e) => setRadiusInput(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleSearch()}
-              disabled={isBusy}
-              className="w-24 border border-gray-300 rounded-md px-2 py-1 text-sm text-center focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
-            />
-            <span className="text-sm text-gray-500">ft</span>
-          </div>
+        {/* Tab navigation */}
+        <div className="max-w-2xl mx-auto px-4 flex border-t border-gray-100">
           <button
-            onClick={handleSearch}
-            disabled={isBusy}
-            className="flex items-center gap-1.5 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-md px-3 py-1.5 transition-colors cursor-pointer disabled:cursor-not-allowed"
+            onClick={() => setActiveTab("nearby")}
+            className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px ${
+              activeTab === "nearby"
+                ? "border-blue-600 text-blue-600"
+                : "border-transparent text-gray-500 hover:text-gray-700"
+            }`}
           >
-            <SearchIcon />
+            <MapPinTabIcon />
+            Nearby
+          </button>
+          <button
+            onClick={() => setActiveTab("saved")}
+            className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px ${
+              activeTab === "saved"
+                ? "border-blue-600 text-blue-600"
+                : "border-transparent text-gray-500 hover:text-gray-700"
+            }`}
+          >
+            <BookmarkTabIcon />
+            Saved
+            {savedPlacesData.size > 0 && (
+              <span className={`text-xs font-semibold px-1.5 py-0.5 rounded-full ${
+                activeTab === "saved" ? "bg-blue-100 text-blue-600" : "bg-gray-100 text-gray-500"
+              }`}>
+                {savedPlacesData.size}
+              </span>
+            )}
+          </button>
+          <button
+            onClick={() => setActiveTab("search")}
+            className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px ${
+              activeTab === "search"
+                ? "border-blue-600 text-blue-600"
+                : "border-transparent text-gray-500 hover:text-gray-700"
+            }`}
+          >
+            <SearchTabIcon />
             Search
           </button>
         </div>
+      </header>
 
-        {status === "locating" && (
-          <StatusCard
-            icon="📍"
-            title="Finding your location…"
-            subtitle="Please allow location access when prompted"
-            pulse
-          />
-        )}
+      <main className="max-w-2xl mx-auto px-4 py-6">
+        {activeTab === "nearby" && (
+          <>
+            {/* Radius control */}
+            <div className="flex items-center gap-2 mb-5 bg-white rounded-lg border border-gray-200 p-3 shadow-sm">
+              <label
+                htmlFor="radius-input"
+                className="text-sm font-medium text-gray-700 shrink-0"
+              >
+                Search radius:
+              </label>
+              <div className="flex items-center gap-1.5 flex-1">
+                <input
+                  id="radius-input"
+                  type="number"
+                  min="50"
+                  max="26400"
+                  step="50"
+                  value={radiusInput}
+                  onChange={(e) => setRadiusInput(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleSearch()}
+                  disabled={isBusy}
+                  className="w-24 border border-gray-300 rounded-md px-2 py-1 text-sm text-center focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                />
+                <span className="text-sm text-gray-500">ft</span>
+              </div>
+              <button
+                onClick={handleSearch}
+                disabled={isBusy}
+                className="flex items-center gap-1.5 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-md px-3 py-1.5 transition-colors cursor-pointer disabled:cursor-not-allowed"
+              >
+                <SearchIcon />
+                Search
+              </button>
+            </div>
 
-        {status === "loading" && (
-          <StatusCard
-            icon="🔍"
-            title="Searching for restaurants…"
-            subtitle={`Looking within ${radiusFt.toLocaleString()} feet of you`}
-            pulse
-          />
-        )}
-
-        {status === "error" && (
-          <LocationError message={errorMessage} onRetry={getLocation} />
-        )}
-
-        {status === "success" && restaurants.length === 0 && (
-          <StatusCard
-            icon="🤷"
-            title="No restaurants found nearby"
-            subtitle={`There are no restaurants within ${radiusFt.toLocaleString()} feet of your current location`}
-          />
-        )}
-
-        {status === "success" && restaurants.length > 0 && (
-          <div className="space-y-3">
-            <p className="text-sm font-medium text-gray-600">
-              {restaurants.length} restaurant
-              {restaurants.length !== 1 ? "s" : ""} within{" "}
-              {radiusFt.toLocaleString()} ft
-            </p>
-            {restaurants.map((r, i) => (
-              <RestaurantCard
-                key={r.place_id}
-                restaurant={r}
-                rank={i + 1}
-                distanceFt={metersToFeet(r.distance ?? 0)}
-                isSaved={savedPlacesData.has(r.place_id)}
-                isSignedIn={!!isSignedIn}
-                visits={savedPlacesData.get(r.place_id) ?? []}
-                onSaveToggle={handleSaveToggle}
-                onAddVisit={handleAddVisit}
-                onDeleteVisit={handleDeleteVisit}
+            {status === "locating" && (
+              <StatusCard
+                icon="📍"
+                title="Finding your location…"
+                subtitle="Please allow location access when prompted"
+                pulse
               />
-            ))}
-          </div>
+            )}
+
+            {status === "loading" && (
+              <StatusCard
+                icon="🔍"
+                title="Searching for restaurants…"
+                subtitle={`Looking within ${radiusFt.toLocaleString()} feet of you`}
+                pulse
+              />
+            )}
+
+            {status === "error" && (
+              <LocationError message={errorMessage} onRetry={getLocation} />
+            )}
+
+            {status === "success" && restaurants.length === 0 && (
+              <StatusCard
+                icon="🤷"
+                title="No restaurants found nearby"
+                subtitle={`There are no restaurants within ${radiusFt.toLocaleString()} feet of your current location`}
+              />
+            )}
+
+            {status === "success" && restaurants.length > 0 && (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-medium text-gray-600">
+                    {restaurants.length} restaurant
+                    {restaurants.length !== 1 ? "s" : ""} within{" "}
+                    {radiusFt.toLocaleString()} ft
+                  </p>
+                  <div className="flex items-center gap-0.5 bg-gray-100 rounded-lg p-0.5">
+                    <button
+                      onClick={() => setNearbyView("list")}
+                      title="List view"
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
+                        nearbyView === "list"
+                          ? "bg-white text-gray-900 shadow-sm"
+                          : "text-gray-500 hover:text-gray-700"
+                      }`}
+                    >
+                      <ListViewIcon />
+                      List
+                    </button>
+                    <button
+                      onClick={() => setNearbyView("map")}
+                      title="Map view"
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
+                        nearbyView === "map"
+                          ? "bg-white text-gray-900 shadow-sm"
+                          : "text-gray-500 hover:text-gray-700"
+                      }`}
+                    >
+                      <MapViewIcon />
+                      Map
+                    </button>
+                  </div>
+                </div>
+
+                {nearbyView === "list" && restaurants.map((r, i) => (
+                  <RestaurantCard
+                    key={r.place_id}
+                    restaurant={r}
+                    rank={i + 1}
+                    distanceFt={metersToFeet(r.distance ?? 0)}
+                    isSaved={savedPlacesData.has(r.place_id)}
+                    isSignedIn={!!isSignedIn}
+                    visits={savedPlacesData.get(r.place_id)?.visits ?? []}
+                    onSaveToggle={handleSaveToggle}
+                    onAddVisit={handleAddVisit}
+                    onDeleteVisit={handleDeleteVisit}
+                  />
+                ))}
+
+                {nearbyView === "map" && coords && (
+                  <NearbyMap restaurants={restaurants} userCoords={coords} />
+                )}
+              </div>
+            )}
+          </>
+        )}
+
+        {activeTab === "saved" && (
+          <SavedPlacesTab
+            savedPlaces={savedPlacesData}
+            isSignedIn={!!isSignedIn}
+            onSaveToggle={handleSaveToggle}
+            onAddVisit={handleAddVisit}
+            onDeleteVisit={handleDeleteVisit}
+          />
+        )}
+
+        {activeTab === "search" && (
+          <SearchTab
+            isSignedIn={!!isSignedIn}
+            savedPlacesData={savedPlacesData}
+            onSaveToggle={handleSaveToggle}
+            onAddVisit={handleAddVisit}
+            onDeleteVisit={handleDeleteVisit}
+          />
         )}
       </main>
     </div>
@@ -373,6 +617,14 @@ function PinIcon() {
   );
 }
 
+function EditIcon() {
+  return (
+    <svg className="w-3 h-3 text-gray-400 group-hover:text-blue-500 shrink-0 transition-colors ml-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536M9 13l6.586-6.586a2 2 0 012.828 0l.172.172a2 2 0 010 2.828L12 16H9v-3z" />
+    </svg>
+  );
+}
+
 function RefreshIcon() {
   return (
     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -385,6 +637,47 @@ function SearchIcon() {
   return (
     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
+    </svg>
+  );
+}
+
+function MapPinTabIcon() {
+  return (
+    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+    </svg>
+  );
+}
+
+function BookmarkTabIcon() {
+  return (
+    <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+    </svg>
+  );
+}
+
+function SearchTabIcon() {
+  return (
+    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
+    </svg>
+  );
+}
+
+function ListViewIcon() {
+  return (
+    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 10h16M4 14h16M4 18h16" />
+    </svg>
+  );
+}
+
+function MapViewIcon() {
+  return (
+    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
     </svg>
   );
 }

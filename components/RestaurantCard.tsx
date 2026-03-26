@@ -7,7 +7,7 @@ import { Visit } from "@/types";
 interface Props {
   restaurant: PlaceResult;
   rank: number;
-  distanceFt: number;
+  distanceFt?: number;
   isSaved?: boolean;
   isSignedIn?: boolean;
   visits?: Visit[];
@@ -19,7 +19,7 @@ interface Props {
 export default function RestaurantCard({
   restaurant,
   rank,
-  distanceFt,
+  distanceFt = undefined,
   isSaved = false,
   isSignedIn = false,
   visits = [],
@@ -37,9 +37,11 @@ export default function RestaurantCard({
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const formattedDistance =
-    distanceFt < 1000
-      ? `${Math.round(distanceFt)} ft`
-      : `${(distanceFt / 5280).toFixed(2)} mi`;
+    distanceFt === undefined
+      ? null
+      : distanceFt < 1000
+        ? `${Math.round(distanceFt)} ft`
+        : `${(distanceFt / 5280).toFixed(2)} mi`;
 
   const isOpen = opening_hours?.open_now;
 
@@ -101,10 +103,12 @@ export default function RestaurantCard({
 
         {/* Distance + open/closed + save */}
         <div className="flex flex-col items-end gap-1 flex-shrink-0">
-          <span className="inline-flex items-center gap-1 text-xs font-semibold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full">
-            <PinIcon />
-            {formattedDistance}
-          </span>
+          {formattedDistance !== null && (
+            <span className="inline-flex items-center gap-1 text-xs font-semibold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full">
+              <PinIcon />
+              {formattedDistance}
+            </span>
+          )}
           {opening_hours !== undefined && (
             <span
               className={`text-xs font-medium ${

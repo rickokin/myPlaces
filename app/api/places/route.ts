@@ -14,6 +14,10 @@ export async function GET() {
     .select({
       placeId: savedPlaces.placeId,
       name: savedPlaces.name,
+      vicinity: savedPlaces.vicinity,
+      city: savedPlaces.city,
+      state: savedPlaces.state,
+      country: savedPlaces.country,
       visitId: placeVisits.id,
       rating: placeVisits.rating,
       note: placeVisits.note,
@@ -23,10 +27,17 @@ export async function GET() {
     .leftJoin(placeVisits, eq(placeVisits.savedPlaceId, savedPlaces.id))
     .where(eq(savedPlaces.userId, userId));
 
-  const placesMap = new Map<string, { name: string; visits: { id: string; rating: number | null; note: string | null; visitedAt: string | null }[] }>();
+  const placesMap = new Map<string, {
+    name: string;
+    vicinity: string | null;
+    city: string | null;
+    state: string | null;
+    country: string | null;
+    visits: { id: string; rating: number | null; note: string | null; visitedAt: string | null }[];
+  }>();
   for (const row of rows) {
     if (!placesMap.has(row.placeId)) {
-      placesMap.set(row.placeId, { name: row.name, visits: [] });
+      placesMap.set(row.placeId, { name: row.name, vicinity: row.vicinity, city: row.city, state: row.state, country: row.country, visits: [] });
     }
     if (row.visitId) {
       placesMap.get(row.placeId)!.visits.push({
@@ -41,6 +52,10 @@ export async function GET() {
   const result = Array.from(placesMap.entries()).map(([placeId, data]) => ({
     placeId,
     name: data.name,
+    vicinity: data.vicinity,
+    city: data.city,
+    state: data.state,
+    country: data.country,
     visits: data.visits,
   }));
 
@@ -54,10 +69,13 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json();
-  const { placeId, name, vicinity } = body as {
+  const { placeId, name, vicinity, city, state, country } = body as {
     placeId?: string;
     name?: string;
     vicinity?: string;
+    city?: string;
+    state?: string;
+    country?: string;
   };
 
   if (!placeId || !name) {
@@ -66,7 +84,7 @@ export async function POST(req: NextRequest) {
 
   await db
     .insert(savedPlaces)
-    .values({ userId, placeId, name, vicinity })
+    .values({ userId, placeId, name, vicinity, city, state, country })
     .onConflictDoNothing();
 
   return NextResponse.json({ success: true });

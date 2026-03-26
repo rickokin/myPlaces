@@ -10,6 +10,9 @@ export const savedPlaces = pgTable(
     placeId: text("place_id").notNull(),
     name: text("name").notNull(),
     vicinity: text("vicinity"),
+    city: text("city"),
+    state: text("state"),
+    country: text("country"),
     savedAt: timestamp("saved_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => [uniqueIndex("user_place_unique").on(t.userId, t.placeId)]
