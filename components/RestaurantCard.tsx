@@ -11,6 +11,7 @@ interface Props {
   isSaved?: boolean;
   isSignedIn?: boolean;
   visits?: Visit[];
+  onCardClick?: (restaurant: PlaceResult) => void;
   onSaveToggle?: (placeId: string, saved: boolean) => void;
   onAddVisit?: (placeId: string, rating: number | null, note: string) => Promise<Visit>;
   onEditVisit?: (visitId: string, placeId: string, rating: number | null, note: string) => Promise<Visit>;
@@ -24,6 +25,7 @@ export default function RestaurantCard({
   isSaved = false,
   isSignedIn = false,
   visits = [],
+  onCardClick,
   onSaveToggle,
   onAddVisit,
   onEditVisit,
@@ -104,13 +106,17 @@ export default function RestaurantCard({
       }`}
     >
       <div className="flex items-start justify-between gap-3 mb-3">
-        <div className="flex items-start gap-3 min-w-0">
+        <button
+          onClick={() => onCardClick?.(restaurant)}
+          className="flex items-start gap-3 min-w-0 text-left flex-1 group"
+          disabled={!onCardClick}
+        >
           {/* Rank badge */}
           <div className="flex-shrink-0 w-7 h-7 rounded-full bg-blue-50 text-blue-600 text-xs font-bold flex items-center justify-center mt-0.5">
             {rank}
           </div>
           <div className="min-w-0">
-            <h2 className="font-semibold text-gray-900 text-base leading-tight truncate">
+            <h2 className={`font-semibold text-gray-900 text-base leading-tight truncate ${onCardClick ? "group-hover:text-blue-600 transition-colors" : ""}`}>
               {name}
             </h2>
             {/* Google rating */}
@@ -124,7 +130,7 @@ export default function RestaurantCard({
               </div>
             )}
           </div>
-        </div>
+        </button>
 
         {/* Distance + open/closed + save */}
         <div className="flex flex-col items-end gap-1 flex-shrink-0">

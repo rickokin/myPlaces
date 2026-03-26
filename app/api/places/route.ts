@@ -4,6 +4,19 @@ import { db } from "@/db";
 import { savedPlaces, placeVisits } from "@/db/schema";
 import { eq, and } from "drizzle-orm";
 
+const LIMITS = {
+  placeId: 500,
+  name: 200,
+  vicinity: 300,
+  city: 100,
+  state: 100,
+  country: 100,
+} as const;
+
+function truncate(value: string | undefined, max: number): string | undefined {
+  return value ? value.slice(0, max) : value;
+}
+
 export async function GET() {
   const { userId } = await auth();
   if (!userId) {
@@ -82,9 +95,21 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
   }
 
+  if (typeof placeId !== "string" || typeof name !== "string") {
+    return NextResponse.json({ error: "Invalid field types" }, { status: 400 });
+  }
+
   await db
     .insert(savedPlaces)
-    .values({ userId, placeId, name, vicinity, city, state, country })
+    .values({
+      userId,
+      placeId: placeId.slice(0, LIMITS.placeId),
+      name: name.slice(0, LIMITS.name),
+      vicinity: truncate(vicinity, LIMITS.vicinity),
+      city: truncate(city, LIMITS.city),
+      state: truncate(state, LIMITS.state),
+      country: truncate(country, LIMITS.country),
+    })
     .onConflictDoNothing();
 
   return NextResponse.json({ success: true });

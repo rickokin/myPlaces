@@ -8,6 +8,7 @@ import LocationError from "@/components/LocationError";
 import SavedPlacesTab from "@/components/SavedPlacesTab";
 import SearchTab from "@/components/SearchTab";
 import NearbyMap from "@/components/NearbyMap";
+import PlaceDetailModal from "@/components/PlaceDetailModal";
 import { Visit } from "@/types";
 
 type Status = "idle" | "locating" | "loading" | "success" | "error";
@@ -41,6 +42,7 @@ export default function HomeClient() {
   const [savedPlacesData, setSavedPlacesData] = useState<Map<string, SavedPlaceEntry>>(new Map());
   const [activeTab, setActiveTab] = useState<ActiveTab>("nearby");
   const [nearbyView, setNearbyView] = useState<NearbyView>("list");
+  const [selectedPlace, setSelectedPlace] = useState<PlaceResult | null>(null);
   const radiusFtRef = useRef<number>(DEFAULT_RADIUS_FT);
 
   const fetchRestaurants = useCallback(
@@ -283,8 +285,8 @@ export default function HomeClient() {
   }, [fetchRestaurants, fetchAddress]);
 
   useEffect(() => {
-    getLocation();
-  }, [getLocation]);
+    if (isSignedIn) getLocation();
+  }, [isSignedIn, getLocation]);
 
   const handleAddressSearch = useCallback(async () => {
     const trimmed = addressInput.trim();
@@ -471,7 +473,17 @@ export default function HomeClient() {
       </header>
 
       <main className="max-w-2xl mx-auto px-4 py-6">
-        {activeTab === "nearby" && (
+        {activeTab === "nearby" && !isSignedIn && (
+          <div className="flex flex-col items-center justify-center py-20 text-center gap-3">
+            <span className="text-5xl">🔒</span>
+            <h2 className="text-lg font-semibold text-gray-800">Sign in to find nearby restaurants</h2>
+            <p className="text-sm text-gray-500 max-w-xs">
+              Create an account or sign in to discover restaurants near you.
+            </p>
+          </div>
+        )}
+
+        {activeTab === "nearby" && isSignedIn && (
           <>
             {/* Radius control */}
             <div className="flex items-center gap-2 mb-5 bg-white rounded-lg border border-gray-200 p-3 shadow-sm">
@@ -581,6 +593,7 @@ export default function HomeClient() {
                     isSaved={savedPlacesData.has(r.place_id)}
                     isSignedIn={!!isSignedIn}
                     visits={savedPlacesData.get(r.place_id)?.visits ?? []}
+                    onCardClick={setSelectedPlace}
                     onSaveToggle={handleSaveToggle}
                     onAddVisit={handleAddVisit}
                     onEditVisit={handleEditVisit}
@@ -615,9 +628,17 @@ export default function HomeClient() {
             onAddVisit={handleAddVisit}
             onEditVisit={handleEditVisit}
             onDeleteVisit={handleDeleteVisit}
+            onCardClick={setSelectedPlace}
           />
         )}
       </main>
+
+      {selectedPlace && (
+        <PlaceDetailModal
+          place={selectedPlace}
+          onClose={() => setSelectedPlace(null)}
+        />
+      )}
     </div>
   );
 }

@@ -15,6 +15,7 @@ interface Props {
   onAddVisit: (placeId: string, rating: number | null, note: string) => Promise<Visit>;
   onEditVisit: (visitId: string, placeId: string, rating: number | null, note: string) => Promise<Visit>;
   onDeleteVisit: (visitId: string, placeId: string) => Promise<void>;
+  onCardClick?: (restaurant: PlaceResult) => void;
 }
 
 export default function SearchTab({
@@ -24,6 +25,7 @@ export default function SearchTab({
   onAddVisit,
   onEditVisit,
   onDeleteVisit,
+  onCardClick,
 }: Props) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<PlaceResult[]>([]);
@@ -34,7 +36,7 @@ export default function SearchTab({
 
   const handleSearch = useCallback(async () => {
     const trimmed = query.trim();
-    if (!trimmed) return;
+    if (!trimmed || !isSignedIn) return;
     setStatus("loading");
     setErrorMessage("");
     setResults([]);
@@ -89,17 +91,16 @@ export default function SearchTab({
         )}
         <button
           onClick={handleSearch}
-          disabled={!query.trim() || status === "loading"}
+          disabled={!query.trim() || status === "loading" || !isSignedIn}
           className="text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-md px-3 py-1.5 transition-colors cursor-pointer disabled:cursor-not-allowed shrink-0"
         >
           {status === "loading" ? "Searching…" : "Search"}
         </button>
       </div>
 
-      {/* Sign-in nudge (non-blocking — they can still search, just not save) */}
       {!isSignedIn && status !== "idle" && (
         <p className="text-xs text-center text-gray-400">
-          Sign in to save places and log visits.
+          Sign in to search and save places.
         </p>
       )}
 
@@ -149,6 +150,7 @@ export default function SearchTab({
               isSaved={savedPlacesData.has(r.place_id)}
               isSignedIn={isSignedIn}
               visits={savedPlacesData.get(r.place_id)?.visits ?? []}
+              onCardClick={onCardClick}
               onSaveToggle={handleSaveToggleForResult}
               onAddVisit={onAddVisit}
               onEditVisit={onEditVisit}
@@ -158,7 +160,17 @@ export default function SearchTab({
         </div>
       )}
 
-      {status === "idle" && (
+      {status === "idle" && !isSignedIn && (
+        <div className="flex flex-col items-center justify-center py-20 text-center gap-3">
+          <span className="text-5xl">🔒</span>
+          <h2 className="text-lg font-semibold text-gray-800">Sign in to search</h2>
+          <p className="text-sm text-gray-500 max-w-xs">
+            Create an account or sign in to search for restaurants.
+          </p>
+        </div>
+      )}
+
+      {status === "idle" && isSignedIn && (
         <div className="flex flex-col items-center justify-center py-20 text-center gap-3">
           <span className="text-5xl">🍽️</span>
           <h2 className="text-lg font-semibold text-gray-800">Find a restaurant</h2>

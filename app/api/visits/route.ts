@@ -4,6 +4,9 @@ import { db } from "@/db";
 import { savedPlaces, placeVisits } from "@/db/schema";
 import { eq, and } from "drizzle-orm";
 
+const MAX_NOTE_LENGTH = 2000;
+const MAX_PLACE_ID_LENGTH = 500;
+
 export async function POST(req: NextRequest) {
   const { userId } = await auth();
   if (!userId) {
@@ -17,7 +20,7 @@ export async function POST(req: NextRequest) {
     note?: string | null;
   };
 
-  if (!placeId) {
+  if (!placeId || typeof placeId !== "string") {
     return NextResponse.json({ error: "Missing placeId" }, { status: 400 });
   }
 
@@ -25,10 +28,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Rating must be an integer between 1 and 5" }, { status: 400 });
   }
 
+  const safeNote = typeof note === "string" ? note.slice(0, MAX_NOTE_LENGTH) : null;
+
   const [savedPlace] = await db
     .select({ id: savedPlaces.id })
     .from(savedPlaces)
-    .where(and(eq(savedPlaces.userId, userId), eq(savedPlaces.placeId, placeId)));
+    .where(and(eq(savedPlaces.userId, userId), eq(savedPlaces.placeId, placeId.slice(0, MAX_PLACE_ID_LENGTH))));
 
   if (!savedPlace) {
     return NextResponse.json({ error: "Place not saved" }, { status: 404 });
@@ -39,7 +44,7 @@ export async function POST(req: NextRequest) {
     .values({
       savedPlaceId: savedPlace.id,
       rating: rating ?? null,
-      note: note ?? null,
+      note: safeNote,
     })
     .returning();
 
@@ -66,13 +71,15 @@ export async function PATCH(req: NextRequest) {
     note?: string | null;
   };
 
-  if (!visitId) {
+  if (!visitId || typeof visitId !== "string") {
     return NextResponse.json({ error: "Missing visitId" }, { status: 400 });
   }
 
   if (rating !== undefined && rating !== null && (rating < 1 || rating > 5 || !Number.isInteger(rating))) {
     return NextResponse.json({ error: "Rating must be an integer between 1 and 5" }, { status: 400 });
   }
+
+  const safeNote = typeof note === "string" ? note.slice(0, MAX_NOTE_LENGTH) : null;
 
   const [owned] = await db
     .select({ id: placeVisits.id })
@@ -86,7 +93,7 @@ export async function PATCH(req: NextRequest) {
 
   const [visit] = await db
     .update(placeVisits)
-    .set({ rating: rating ?? null, note: note ?? null })
+    .set({ rating: rating ?? null, note: safeNote })
     .where(eq(placeVisits.id, visitId))
     .returning();
 
@@ -109,7 +116,7 @@ export async function DELETE(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const visitId = searchParams.get("visitId");
 
-  if (!visitId) {
+  if (!visitId || typeof visitId !== "string") {
     return NextResponse.json({ error: "Missing visitId" }, { status: 400 });
   }
 

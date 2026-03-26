@@ -1,6 +1,8 @@
+import { auth } from "@clerk/nextjs/server";
 import { NextRequest, NextResponse } from "next/server";
 
 const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY;
+const MAX_ADDRESS_LENGTH = 500;
 
 function buildAddressFromComponents(result: {
   address_components?: { types: string[]; short_name: string; long_name: string }[];
@@ -26,6 +28,11 @@ function buildAddressFromComponents(result: {
 }
 
 export async function GET(request: NextRequest) {
+  const { userId } = await auth();
+  if (!userId) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   if (!GOOGLE_MAPS_API_KEY) {
     return NextResponse.json(
       { error: "Google Maps API key is not configured" },
@@ -40,9 +47,13 @@ export async function GET(request: NextRequest) {
 
   // Forward geocoding: address string → lat/lng
   if (addressQuery) {
+    const safeAddress = addressQuery.trim().slice(0, MAX_ADDRESS_LENGTH);
+    if (!safeAddress) {
+      return NextResponse.json({ error: "Address cannot be empty" }, { status: 400 });
+    }
     try {
       const url = new URL("https://maps.googleapis.com/maps/api/geocode/json");
-      url.searchParams.set("address", addressQuery);
+      url.searchParams.set("address", safeAddress);
       url.searchParams.set("key", GOOGLE_MAPS_API_KEY);
 
       const res = await fetch(url.toString());
@@ -77,9 +88,23 @@ export async function GET(request: NextRequest) {
     );
   }
 
+  const latNum = parseFloat(lat);
+  const lngNum = parseFloat(lng);
+
+  if (
+    !isFinite(latNum) || !isFinite(lngNum) ||
+    latNum < -90 || latNum > 90 ||
+    lngNum < -180 || lngNum > 180
+  ) {
+    return NextResponse.json(
+      { error: "Invalid lat or lng values" },
+      { status: 400 }
+    );
+  }
+
   try {
     const url = new URL("https://maps.googleapis.com/maps/api/geocode/json");
-    url.searchParams.set("latlng", `${lat},${lng}`);
+    url.searchParams.set("latlng", `${latNum},${lngNum}`);
     url.searchParams.set("key", GOOGLE_MAPS_API_KEY);
 
     const res = await fetch(url.toString());
