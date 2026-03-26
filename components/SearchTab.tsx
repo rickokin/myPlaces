@@ -13,6 +13,7 @@ interface Props {
   savedPlacesData: Map<string, SavedPlaceEntry>;
   onSaveToggle: (placeId: string, save: boolean, restaurant: PlaceResult) => Promise<void>;
   onAddVisit: (placeId: string, rating: number | null, note: string) => Promise<Visit>;
+  onEditVisit: (visitId: string, placeId: string, rating: number | null, note: string) => Promise<Visit>;
   onDeleteVisit: (visitId: string, placeId: string) => Promise<void>;
 }
 
@@ -21,6 +22,7 @@ export default function SearchTab({
   savedPlacesData,
   onSaveToggle,
   onAddVisit,
+  onEditVisit,
   onDeleteVisit,
 }: Props) {
   const [query, setQuery] = useState("");
@@ -149,6 +151,7 @@ export default function SearchTab({
               visits={savedPlacesData.get(r.place_id)?.visits ?? []}
               onSaveToggle={handleSaveToggleForResult}
               onAddVisit={onAddVisit}
+              onEditVisit={onEditVisit}
               onDeleteVisit={onDeleteVisit}
             />
           ))}

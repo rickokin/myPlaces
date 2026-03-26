@@ -9,6 +9,7 @@ interface Props {
   isSignedIn: boolean;
   onSaveToggle?: (placeId: string, saved: boolean) => void;
   onAddVisit?: (placeId: string, rating: number | null, note: string) => Promise<Visit>;
+  onEditVisit?: (visitId: string, placeId: string, rating: number | null, note: string) => Promise<Visit>;
   onDeleteVisit?: (visitId: string, placeId: string) => Promise<void>;
 }
 
@@ -23,6 +24,7 @@ export default function SavedPlacesTab({
   isSignedIn,
   onSaveToggle,
   onAddVisit,
+  onEditVisit,
   onDeleteVisit,
 }: Props) {
   const [filterCountry, setFilterCountry] = useState("");
@@ -196,6 +198,7 @@ export default function SavedPlacesTab({
               visits={entry.visits}
               onSaveToggle={onSaveToggle}
               onAddVisit={onAddVisit}
+              onEditVisit={onEditVisit}
               onDeleteVisit={onDeleteVisit}
             />
           ))}
@@ -216,6 +219,7 @@ interface CardProps {
   visits: Visit[];
   onSaveToggle?: (placeId: string, saved: boolean) => void;
   onAddVisit?: (placeId: string, rating: number | null, note: string) => Promise<Visit>;
+  onEditVisit?: (visitId: string, placeId: string, rating: number | null, note: string) => Promise<Visit>;
   onDeleteVisit?: (visitId: string, placeId: string) => Promise<void>;
 }
 
@@ -230,6 +234,7 @@ function SavedPlaceCard({
   visits,
   onSaveToggle,
   onAddVisit,
+  onEditVisit,
   onDeleteVisit,
 }: CardProps) {
   const [showHistory, setShowHistory] = useState(false);
@@ -238,6 +243,11 @@ function SavedPlaceCard({
   const [hoverRating, setHoverRating] = useState<number | null>(null);
   const [visitNote, setVisitNote] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [editingVisitId, setEditingVisitId] = useState<string | null>(null);
+  const [editRating, setEditRating] = useState<number | null>(null);
+  const [editHoverRating, setEditHoverRating] = useState<number | null>(null);
+  const [editNote, setEditNote] = useState("");
+  const [isEditSubmitting, setIsEditSubmitting] = useState(false);
 
   const avg = avgRating(visits);
 
@@ -254,6 +264,24 @@ function SavedPlaceCard({
       setShowHistory(true);
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const startEditVisit = (v: Visit) => {
+    setEditingVisitId(v.id);
+    setEditRating(v.rating);
+    setEditNote(v.note ?? "");
+    setEditHoverRating(null);
+  };
+
+  const handleEditSubmit = async () => {
+    if (!onEditVisit || !editingVisitId) return;
+    setIsEditSubmitting(true);
+    try {
+      await onEditVisit(editingVisitId, placeId, editRating, editNote.trim());
+      setEditingVisitId(null);
+    } finally {
+      setIsEditSubmitting(false);
     }
   };
 
@@ -362,40 +390,108 @@ function SavedPlaceCard({
               .sort((a, b) => new Date(b.visitedAt).getTime() - new Date(a.visitedAt).getTime())
               .map((v) => (
                 <div key={v.id} className="bg-white rounded-lg p-2.5 text-xs relative group border border-amber-100">
-                  <div className="flex items-center justify-between gap-2 mb-1">
-                    <span className="text-gray-400">
-                      {new Date(v.visitedAt).toLocaleDateString(undefined, {
-                        year: "numeric",
-                        month: "short",
-                        day: "numeric",
-                      })}
-                    </span>
-                    <div className="flex items-center gap-2">
-                      {v.rating !== null && (
-                        <span className="flex items-center gap-0.5">
-                          {Array.from({ length: 5 }).map((_, i) => (
-                            <StarIcon
-                              key={i}
-                              filled={i < (v.rating ?? 0)}
-                              className="w-3 h-3"
-                            />
+                  {editingVisitId === v.id ? (
+                    <div className="space-y-2">
+                      <div>
+                        <p className="text-xs font-medium text-gray-600 mb-1.5">Rating (optional)</p>
+                        <div className="flex items-center gap-1">
+                          {[1, 2, 3, 4, 5].map((star) => (
+                            <button
+                              key={star}
+                              type="button"
+                              onClick={() => setEditRating(editRating === star ? null : star)}
+                              onMouseEnter={() => setEditHoverRating(star)}
+                              onMouseLeave={() => setEditHoverRating(null)}
+                              className="transition-transform hover:scale-110"
+                              title={`${star} star${star !== 1 ? "s" : ""}`}
+                            >
+                              <StarIcon
+                                filled={star <= (editHoverRating ?? editRating ?? 0)}
+                                className="w-5 h-5 transition-colors"
+                              />
+                            </button>
                           ))}
-                        </span>
-                      )}
-                      {onDeleteVisit && (
+                          {editRating !== null && (
+                            <span className="text-xs text-gray-500 ml-1">
+                              {["", "Poor", "Fair", "Good", "Very Good", "Excellent"][editRating]}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <div>
+                        <p className="text-xs font-medium text-gray-600 mb-1">Note (optional)</p>
+                        <textarea
+                          value={editNote}
+                          onChange={(e) => setEditNote(e.target.value)}
+                          placeholder="How was your visit?"
+                          rows={2}
+                          maxLength={500}
+                          className="w-full text-sm border border-gray-200 rounded-md px-2.5 py-1.5 resize-none focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white placeholder-gray-400"
+                        />
+                      </div>
+                      <div className="flex items-center gap-2">
                         <button
-                          onClick={() => onDeleteVisit(v.id, placeId)}
-                          title="Delete visit"
-                          className="opacity-0 group-hover:opacity-100 text-gray-300 hover:text-red-400 transition-all"
+                          onClick={handleEditSubmit}
+                          disabled={isEditSubmitting}
+                          className="flex-1 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-md py-1.5 transition-colors"
                         >
-                          <TrashIcon />
+                          {isEditSubmitting ? "Saving…" : "Save"}
                         </button>
-                      )}
+                        <button
+                          onClick={() => setEditingVisitId(null)}
+                          className="text-xs text-gray-500 hover:text-gray-700 px-3 py-1.5 transition-colors"
+                        >
+                          Cancel
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                  {v.note && <p className="text-gray-600 leading-relaxed">{v.note}</p>}
-                  {!v.note && v.rating === null && (
-                    <p className="text-gray-400 italic">No details recorded</p>
+                  ) : (
+                    <>
+                      <div className="flex items-center justify-between gap-2 mb-1">
+                        <span className="text-gray-400">
+                          {new Date(v.visitedAt).toLocaleDateString(undefined, {
+                            year: "numeric",
+                            month: "short",
+                            day: "numeric",
+                          })}
+                        </span>
+                        <div className="flex items-center gap-2">
+                          {v.rating !== null && (
+                            <span className="flex items-center gap-0.5">
+                              {Array.from({ length: 5 }).map((_, i) => (
+                                <StarIcon
+                                  key={i}
+                                  filled={i < (v.rating ?? 0)}
+                                  className="w-3 h-3"
+                                />
+                              ))}
+                            </span>
+                          )}
+                          {onEditVisit && (
+                            <button
+                              onClick={() => startEditVisit(v)}
+                              title="Edit visit"
+                              className="opacity-0 group-hover:opacity-100 text-gray-300 hover:text-blue-400 transition-all"
+                            >
+                              <PencilIcon />
+                            </button>
+                          )}
+                          {onDeleteVisit && (
+                            <button
+                              onClick={() => onDeleteVisit(v.id, placeId)}
+                              title="Delete visit"
+                              className="opacity-0 group-hover:opacity-100 text-gray-300 hover:text-red-400 transition-all"
+                            >
+                              <TrashIcon />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      {v.note && <p className="text-gray-600 leading-relaxed">{v.note}</p>}
+                      {!v.note && v.rating === null && (
+                        <p className="text-gray-400 italic">No details recorded</p>
+                      )}
+                    </>
                   )}
                 </div>
               ))}
@@ -533,6 +629,14 @@ function TrashIcon() {
   return (
     <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+    </svg>
+  );
+}
+
+function PencilIcon() {
+  return (
+    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536M9 13l6.586-6.586a2 2 0 012.828 0l.172.172a2 2 0 010 2.828L12 16H9v-3z" />
     </svg>
   );
 }

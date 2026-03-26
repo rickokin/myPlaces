@@ -199,6 +199,36 @@ export default function HomeClient() {
     return visit;
   }, []);
 
+  const handleEditVisit = useCallback(async (
+    visitId: string,
+    placeId: string,
+    rating: number | null,
+    note: string
+  ): Promise<Visit> => {
+    const res = await fetch("/api/visits", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ visitId, rating, note: note || null }),
+    });
+    if (!res.ok) {
+      const data = await res.json();
+      throw new Error(data.error ?? "Failed to update visit");
+    }
+    const { visit } = await res.json() as { visit: Visit };
+    setSavedPlacesData((prev) => {
+      const next = new Map(prev);
+      const existing = next.get(placeId);
+      if (existing) {
+        next.set(placeId, {
+          ...existing,
+          visits: existing.visits.map((v) => (v.id === visitId ? visit : v)),
+        });
+      }
+      return next;
+    });
+    return visit;
+  }, []);
+
   const handleDeleteVisit = useCallback(async (visitId: string, placeId: string) => {
     // Optimistic update
     setSavedPlacesData((prev) => {
@@ -553,6 +583,7 @@ export default function HomeClient() {
                     visits={savedPlacesData.get(r.place_id)?.visits ?? []}
                     onSaveToggle={handleSaveToggle}
                     onAddVisit={handleAddVisit}
+                    onEditVisit={handleEditVisit}
                     onDeleteVisit={handleDeleteVisit}
                   />
                 ))}
@@ -571,6 +602,7 @@ export default function HomeClient() {
             isSignedIn={!!isSignedIn}
             onSaveToggle={handleSaveToggle}
             onAddVisit={handleAddVisit}
+            onEditVisit={handleEditVisit}
             onDeleteVisit={handleDeleteVisit}
           />
         )}
@@ -581,6 +613,7 @@ export default function HomeClient() {
             savedPlacesData={savedPlacesData}
             onSaveToggle={handleSaveToggle}
             onAddVisit={handleAddVisit}
+            onEditVisit={handleEditVisit}
             onDeleteVisit={handleDeleteVisit}
           />
         )}
