@@ -44,6 +44,7 @@ export default function RestaurantCard({
   const [editHoverRating, setEditHoverRating] = useState<number | null>(null);
   const [editNote, setEditNote] = useState("");
   const [isEditSubmitting, setIsEditSubmitting] = useState(false);
+  const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
   const [visitError, setVisitError] = useState<string | null>(null);
 
   const formattedDistance =
@@ -80,6 +81,7 @@ export default function RestaurantCard({
 
   const handleDeleteVisit = async (visitId: string) => {
     if (!onDeleteVisit) return;
+    setConfirmingDeleteId(null);
     await onDeleteVisit(visitId, restaurant.place_id);
   };
 
@@ -351,9 +353,9 @@ export default function RestaurantCard({
                                 <PencilIcon />
                               </button>
                             )}
-                            {onDeleteVisit && (
+                            {onDeleteVisit && confirmingDeleteId !== v.id && (
                               <button
-                                onClick={() => handleDeleteVisit(v.id)}
+                                onClick={() => setConfirmingDeleteId(v.id)}
                                 title="Delete visit"
                                 className="text-gray-400 hover:text-red-500 md:opacity-0 md:group-hover:opacity-100 transition-all"
                               >
@@ -365,6 +367,23 @@ export default function RestaurantCard({
                         {v.note && <p className="text-gray-600 leading-relaxed">{v.note}</p>}
                         {!v.note && v.rating === null && (
                           <p className="text-gray-400 italic">No details recorded</p>
+                        )}
+                        {confirmingDeleteId === v.id && (
+                          <div className="flex items-center gap-2 mt-1.5 pt-1.5 border-t border-gray-200">
+                            <span className="text-xs text-red-600 font-medium">Delete this visit?</span>
+                            <button
+                              onClick={() => handleDeleteVisit(v.id)}
+                              className="text-xs font-medium text-white bg-red-500 hover:bg-red-600 rounded px-2 py-0.5 transition-colors"
+                            >
+                              Delete
+                            </button>
+                            <button
+                              onClick={() => setConfirmingDeleteId(null)}
+                              className="text-xs text-gray-500 hover:text-gray-700 transition-colors"
+                            >
+                              Cancel
+                            </button>
+                          </div>
                         )}
                       </>
                     )}
