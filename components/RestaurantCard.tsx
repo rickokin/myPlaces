@@ -44,6 +44,7 @@ export default function RestaurantCard({
   const [editHoverRating, setEditHoverRating] = useState<number | null>(null);
   const [editNote, setEditNote] = useState("");
   const [isEditSubmitting, setIsEditSubmitting] = useState(false);
+  const [visitError, setVisitError] = useState<string | null>(null);
 
   const formattedDistance =
     distanceFt === undefined
@@ -63,12 +64,15 @@ export default function RestaurantCard({
   const handleSubmitVisit = async () => {
     if (!onAddVisit) return;
     setIsSubmitting(true);
+    setVisitError(null);
     try {
       await onAddVisit(restaurant.place_id, visitRating, visitNote.trim());
       setVisitRating(null);
       setVisitNote("");
       setShowVisitForm(false);
       setShowHistory(true);
+    } catch (err) {
+      setVisitError(err instanceof Error ? err.message : "Failed to save visit");
     } finally {
       setIsSubmitting(false);
     }
@@ -342,7 +346,7 @@ export default function RestaurantCard({
                               <button
                                 onClick={() => startEditVisit(v)}
                                 title="Edit visit"
-                                className="opacity-0 group-hover:opacity-100 text-gray-300 hover:text-blue-400 transition-all"
+                                className="text-gray-400 hover:text-blue-500 md:opacity-0 md:group-hover:opacity-100 transition-all"
                               >
                                 <PencilIcon />
                               </button>
@@ -351,7 +355,7 @@ export default function RestaurantCard({
                               <button
                                 onClick={() => handleDeleteVisit(v.id)}
                                 title="Delete visit"
-                                className="opacity-0 group-hover:opacity-100 text-gray-300 hover:text-red-400 transition-all"
+                                className="text-gray-400 hover:text-red-500 md:opacity-0 md:group-hover:opacity-100 transition-all"
                               >
                                 <TrashIcon />
                               </button>
@@ -416,6 +420,10 @@ export default function RestaurantCard({
                 />
               </div>
 
+              {visitError && (
+                <p className="text-xs text-red-600 bg-red-50 rounded-md px-2.5 py-1.5">{visitError}</p>
+              )}
+
               <div className="flex items-center gap-2">
                 <button
                   onClick={handleSubmitVisit}
@@ -429,6 +437,7 @@ export default function RestaurantCard({
                     setShowVisitForm(false);
                     setVisitRating(null);
                     setVisitNote("");
+                    setVisitError(null);
                   }}
                   className="text-sm text-gray-500 hover:text-gray-700 px-3 py-1.5 transition-colors"
                 >

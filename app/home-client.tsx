@@ -138,8 +138,9 @@ export default function HomeClient() {
     });
 
     try {
+      let res: Response;
       if (save) {
-        await fetch("/api/places", {
+        res = await fetch("/api/places", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -152,8 +153,9 @@ export default function HomeClient() {
           }),
         });
       } else {
-        await fetch(`/api/places?placeId=${encodeURIComponent(placeId)}`, { method: "DELETE" });
+        res = await fetch(`/api/places?placeId=${encodeURIComponent(placeId)}`, { method: "DELETE" });
       }
+      if (!res.ok) throw new Error("Server error");
     } catch {
       // Revert optimistic update on failure
       setSavedPlacesData((prev) => {
