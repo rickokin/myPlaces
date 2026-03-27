@@ -43,6 +43,7 @@ export default function HomeClient() {
   const [activeTab, setActiveTab] = useState<ActiveTab>("nearby");
   const [nearbyView, setNearbyView] = useState<NearbyView>("list");
   const [selectedPlace, setSelectedPlace] = useState<PlaceResult | null>(null);
+  const [showAbout, setShowAbout] = useState(false);
   const radiusFtRef = useRef<number>(DEFAULT_RADIUS_FT);
 
   const fetchRestaurants = useCallback(
@@ -361,7 +362,15 @@ export default function HomeClient() {
               </SignUpButton>
             </Show>
             <Show when="signed-in">
-              <UserButton />
+              <UserButton>
+                <UserButton.MenuItems>
+                  <UserButton.Action
+                    label="About"
+                    labelIcon={<InfoIcon />}
+                    onClick={() => setShowAbout(true)}
+                  />
+                </UserButton.MenuItems>
+              </UserButton>
             </Show>
           </div>
         </div>
@@ -641,6 +650,8 @@ export default function HomeClient() {
           onClose={() => setSelectedPlace(null)}
         />
       )}
+
+      {showAbout && <AboutModal onClose={() => setShowAbout(false)} />}
     </div>
   );
 }
@@ -735,5 +746,39 @@ function MapViewIcon() {
     <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
     </svg>
+  );
+}
+
+function InfoIcon() {
+  return (
+    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+    </svg>
+  );
+}
+
+function AboutModal({ onClose }: { onClose: () => void }) {
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div className="bg-white rounded-xl shadow-xl max-w-sm w-full mx-4 p-6 text-center">
+        <span className="text-4xl block mb-3">🍽️</span>
+        <h2 className="text-xl font-bold text-gray-900 mb-1">Nearby Eats</h2>
+        <p className="text-sm text-gray-500 mb-4">
+          Version {process.env.NEXT_PUBLIC_APP_VERSION ?? "unknown"}
+        </p>
+        <p className="text-sm text-gray-600 mb-6">
+          Discover and save restaurants near your current location.
+        </p>
+        <button
+          onClick={onClose}
+          className="text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md px-4 py-2 transition-colors"
+        >
+          Close
+        </button>
+      </div>
+    </div>
   );
 }
