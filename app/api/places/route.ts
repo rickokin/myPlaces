@@ -1,4 +1,4 @@
-import { auth } from "@clerk/nextjs/server";
+import { auth, currentUser } from "@clerk/nextjs/server";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { savedPlaces, placeVisits } from "@/db/schema";
@@ -99,10 +99,16 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid field types" }, { status: 400 });
   }
 
+  const user = await currentUser();
+  const userEmail = user?.emailAddresses.find(
+    (e) => e.id === user.primaryEmailAddressId
+  )?.emailAddress ?? null;
+
   await db
     .insert(savedPlaces)
     .values({
       userId,
+      userEmail,
       placeId: placeId.slice(0, LIMITS.placeId),
       name: name.slice(0, LIMITS.name),
       vicinity: truncate(vicinity, LIMITS.vicinity),

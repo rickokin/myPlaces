@@ -7,6 +7,7 @@ export const savedPlaces = pgTable(
       .primaryKey()
       .$defaultFn(() => crypto.randomUUID()),
     userId: text("user_id").notNull(),
+    userEmail: text("user_email"),
     placeId: text("place_id").notNull(),
     name: text("name").notNull(),
     vicinity: text("vicinity"),
