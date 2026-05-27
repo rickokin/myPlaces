@@ -5,14 +5,14 @@ const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY;
 const MAX_ADDRESS_LENGTH = 500;
 
 function buildAddressFromComponents(result: {
-  address_components?: { types: string[]; short_name: string; long_name: string }[];
+  address_components?: { types?: string[]; short_name: string; long_name: string }[];
   formatted_address?: string;
 }): string {
-  const components: { types: string[]; short_name: string; long_name: string }[] =
+  const components: { types?: string[]; short_name: string; long_name: string }[] =
     result.address_components ?? [];
 
   const get = (type: string, nameKey: "short_name" | "long_name" = "short_name") =>
-    components.find((c) => c.types.includes(type))?.[nameKey] ?? "";
+    components.find((c) => c.types?.includes(type))?.[nameKey] ?? "";
 
   const streetNumber = get("street_number");
   const route = get("route", "long_name");

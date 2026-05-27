@@ -53,7 +53,7 @@ export interface NewPlaceApiResult {
   addressComponents?: Array<{
     longText: string;
     shortText: string;
-    types: string[];
+    types?: string[];
   }>;
 }
 
@@ -89,7 +89,7 @@ function parseLocation(
 ): { city?: string; state?: string; country?: string } {
   if (!components) return {};
   const get = (type: string, key: "longText" | "shortText" = "longText") =>
-    components.find((c) => c.types.includes(type))?.[key];
+    components.find((c) => c.types?.includes(type))?.[key];
   return {
     city: get("locality") || get("postal_town") || get("sublocality_level_1"),
     state: get("administrative_area_level_1"),
