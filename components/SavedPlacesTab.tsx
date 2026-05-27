@@ -1,12 +1,16 @@
 "use client";
 
 import { useState, useMemo } from "react";
+import { useRouter } from "next/navigation";
 import { SavedPlaceEntry } from "@/app/home-client";
 import { Visit } from "@/types";
+
+type Variant = "been" | "potential";
 
 interface Props {
   savedPlaces: Map<string, SavedPlaceEntry>;
   isSignedIn: boolean;
+  variant?: Variant;
   onSaveToggle?: (placeId: string, saved: boolean) => void;
   onAddVisit?: (placeId: string, rating: number | null, note: string) => Promise<Visit>;
   onEditVisit?: (visitId: string, placeId: string, rating: number | null, note: string) => Promise<Visit>;
@@ -22,11 +26,13 @@ function avgRating(visits: Visit[]): number | null {
 export default function SavedPlacesTab({
   savedPlaces,
   isSignedIn,
+  variant = "been",
   onSaveToggle,
   onAddVisit,
   onEditVisit,
   onDeleteVisit,
 }: Props) {
+  const isPotential = variant === "potential";
   const [filterCountry, setFilterCountry] = useState("");
   const [filterState, setFilterState] = useState("");
   const [filterCity, setFilterCity] = useState("");
@@ -83,7 +89,9 @@ export default function SavedPlacesTab({
     return (
       <div className="flex flex-col items-center justify-center py-20 text-center gap-3">
         <span className="text-5xl">🔒</span>
-        <h2 className="text-lg font-semibold text-gray-800">Sign in to see saved places</h2>
+        <h2 className="text-lg font-semibold text-gray-800">
+          {isPotential ? "Sign in to see potential places" : "Sign in to see places you've been"}
+        </h2>
         <p className="text-sm text-gray-500 max-w-xs">
           Create an account or sign in to save restaurants and track your visits.
         </p>
@@ -94,10 +102,14 @@ export default function SavedPlacesTab({
   if (savedPlaces.size === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-20 text-center gap-3">
-        <span className="text-5xl">🔖</span>
-        <h2 className="text-lg font-semibold text-gray-800">No saved restaurants yet</h2>
+        <span className="text-5xl">{isPotential ? "✨" : "🔖"}</span>
+        <h2 className="text-lg font-semibold text-gray-800">
+          {isPotential ? "No potential restaurants yet" : "No restaurants you've been to yet"}
+        </h2>
         <p className="text-sm text-gray-500 max-w-xs">
-          Browse the Nearby tab and tap Save on any restaurant to add it here.
+          {isPotential
+            ? "Save a restaurant from the Nearby tab and it will land here until you log your first visit."
+            : "Log a visit on any saved restaurant and it will show up here."}
         </p>
       </div>
     );
@@ -170,18 +182,18 @@ export default function SavedPlacesTab({
 
       {/* Result count */}
       <p className="text-sm font-medium text-gray-600">
-        {filtered.length} saved restaurant{filtered.length !== 1 ? "s" : ""}
+        {filtered.length} {isPotential ? "potential" : "visited"} restaurant{filtered.length !== 1 ? "s" : ""}
         {(filterCountry || filterState || filterCity) && (
           <span className="text-gray-400"> (filtered)</span>
         )}
         {" · "}
-        <span className="text-gray-400">sorted by rating</span>
+        <span className="text-gray-400">{isPotential ? "sorted by name" : "sorted by rating"}</span>
       </p>
 
       {filtered.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-16 text-center gap-2">
           <span className="text-4xl">🔍</span>
-          <p className="text-sm text-gray-500">No saved restaurants match these filters.</p>
+          <p className="text-sm text-gray-500">No restaurants match these filters.</p>
         </div>
       ) : (
         <div className="space-y-3">
@@ -196,6 +208,7 @@ export default function SavedPlacesTab({
               state={entry.state}
               country={entry.country}
               visits={entry.visits}
+              variant={variant}
               onSaveToggle={onSaveToggle}
               onAddVisit={onAddVisit}
               onEditVisit={onEditVisit}
@@ -217,6 +230,7 @@ interface CardProps {
   state: string | null;
   country: string | null;
   visits: Visit[];
+  variant: Variant;
   onSaveToggle?: (placeId: string, saved: boolean) => void;
   onAddVisit?: (placeId: string, rating: number | null, note: string) => Promise<Visit>;
   onEditVisit?: (visitId: string, placeId: string, rating: number | null, note: string) => Promise<Visit>;
@@ -232,11 +246,14 @@ function SavedPlaceCard({
   state,
   country,
   visits,
+  variant,
   onSaveToggle,
   onAddVisit,
   onEditVisit,
   onDeleteVisit,
 }: CardProps) {
+  const router = useRouter();
+  const isPotential = variant === "potential";
   const [showHistory, setShowHistory] = useState(false);
   const [showVisitForm, setShowVisitForm] = useState(false);
   const [visitRating, setVisitRating] = useState<number | null>(null);
@@ -248,6 +265,8 @@ function SavedPlaceCard({
   const [editHoverRating, setEditHoverRating] = useState<number | null>(null);
   const [editNote, setEditNote] = useState("");
   const [isEditSubmitting, setIsEditSubmitting] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const avg = avgRating(visits);
 
@@ -285,16 +304,47 @@ function SavedPlaceCard({
     }
   };
 
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const handleConfirmDelete = async () => {
+    if (!onSaveToggle) return;
+    setIsDeleting(true);
+    setDeleteError(null);
+    try {
+      await onSaveToggle(placeId, false);
+      setShowDeleteConfirm(false);
+    } catch (err) {
+      console.error("[SavedPlaceCard] Delete failed", {
+        placeId,
+        name,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      setDeleteError(
+        err instanceof Error ? err.message : "Something went wrong. Please try again."
+      );
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   return (
     <div className="rounded-2xl shadow-sm border bg-amber-50 border-amber-200 p-4 hover:shadow-md transition-shadow">
       <div className="flex items-start justify-between gap-3 mb-3">
-        <div className="flex items-start gap-3 min-w-0">
+        <button
+          type="button"
+          onClick={() =>
+            router.push(`/place/${encodeURIComponent(placeId)}?from=${variant}`)
+          }
+          className="flex items-start gap-3 min-w-0 text-left flex-1 group"
+          title="View place details"
+        >
           {/* Rank badge */}
           <div className="flex-shrink-0 w-7 h-7 rounded-full bg-amber-100 text-amber-700 text-xs font-bold flex items-center justify-center mt-0.5">
             {rank}
           </div>
           <div className="min-w-0">
-            <h2 className="font-semibold text-gray-900 text-base leading-tight truncate">{name}</h2>
+            <h2 className="font-semibold text-gray-900 text-base leading-tight truncate group-hover:text-blue-600 transition-colors">
+              {name}
+            </h2>
             {avg !== null && (
               <div className="flex items-center gap-1 mt-0.5">
                 {[1, 2, 3, 4, 5].map((i) => (
@@ -311,20 +361,66 @@ function SavedPlaceCard({
               </div>
             )}
           </div>
-        </div>
+        </button>
 
-        {/* Unsave button */}
-        {onSaveToggle && (
-          <button
-            onClick={() => onSaveToggle(placeId, false)}
-            title="Remove from saved"
-            className="flex-shrink-0 flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-amber-50 text-amber-600 hover:bg-amber-100 transition-colors"
-          >
-            <BookmarkFilledIcon />
-            Saved
-          </button>
-        )}
+        <div className="flex-shrink-0 flex items-center gap-1.5">
+          {/* Delete button (potential tab only) */}
+          {isPotential && onSaveToggle && (
+            <button
+              onClick={() => setShowDeleteConfirm(true)}
+              title="Delete from potential"
+              className="flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-red-50 text-red-600 hover:bg-red-100 transition-colors"
+            >
+              <TrashIcon />
+              Delete
+            </button>
+          )}
+
+          {/* Unsave button (hidden on potential tab — use the Delete button instead) */}
+          {onSaveToggle && !isPotential && (
+            <button
+              onClick={() => onSaveToggle(placeId, false)}
+              title="Remove from saved"
+              className="flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-amber-50 text-amber-600 hover:bg-amber-100 transition-colors"
+            >
+              <BookmarkFilledIcon />
+              Saved
+            </button>
+          )}
+        </div>
       </div>
+
+      {/* Delete confirmation */}
+      {showDeleteConfirm && (
+        <div className="mb-3 pl-10">
+          <div className="bg-red-50 border border-red-200 rounded-lg p-3 space-y-2">
+            <p className="text-sm text-red-800">
+              Delete <span className="font-semibold">{name}</span> from your potential list? This cannot be undone.
+            </p>
+            {deleteError && (
+              <p className="text-xs text-red-700 bg-red-100 border border-red-200 rounded px-2 py-1">
+                {deleteError}
+              </p>
+            )}
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleConfirmDelete}
+                disabled={isDeleting}
+                className="flex-1 text-xs font-medium text-white bg-red-600 hover:bg-red-700 disabled:opacity-50 rounded-md py-1.5 transition-colors"
+              >
+                {isDeleting ? "Deleting…" : deleteError ? "Try again" : "Yes, delete"}
+              </button>
+              <button
+                onClick={() => { setShowDeleteConfirm(false); setDeleteError(null); }}
+                disabled={isDeleting}
+                className="text-xs text-gray-600 hover:text-gray-800 px-3 py-1.5 transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Location */}
       <div className="pl-10 space-y-1.5">

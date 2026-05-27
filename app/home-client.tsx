@@ -1,18 +1,23 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useRef, useMemo } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { SignInButton, SignUpButton, UserButton, Show, useUser } from "@clerk/nextjs";
 import { PlaceResult } from "./api/restaurants/route";
 import RestaurantCard from "@/components/RestaurantCard";
 import LocationError from "@/components/LocationError";
 import SavedPlacesTab from "@/components/SavedPlacesTab";
 import SearchTab from "@/components/SearchTab";
+import PlaceSearchTab from "@/components/PlaceSearchTab";
 import NearbyMap from "@/components/NearbyMap";
-import PlaceDetailModal from "@/components/PlaceDetailModal";
+import PwaInstallPrompt from "@/components/PwaInstallPrompt";
+import EnableRemindersBanner from "@/components/EnableRemindersBanner";
+import { usePushSubscription } from "@/hooks/usePushSubscription";
+import { useDwellReminder } from "@/hooks/useDwellReminder";
 import { Visit } from "@/types";
 
 type Status = "idle" | "locating" | "loading" | "success" | "error";
-type ActiveTab = "nearby" | "saved" | "search";
+type ActiveTab = "nearby" | "been" | "potential" | "search" | "place-search";
 type NearbyView = "list" | "map";
 
 export type SavedPlaceEntry = {
@@ -26,8 +31,20 @@ export type SavedPlaceEntry = {
 
 const DEFAULT_RADIUS_FT = 300;
 
+const TAB_QUERY_VALUES: Record<string, ActiveTab> = {
+  nearby: "nearby",
+  been: "been",
+  potential: "potential",
+  saved: "been", // legacy alias for old links/bookmarks
+  search: "search",
+  "place-search": "place-search",
+};
+
 export default function HomeClient() {
-  const { isSignedIn } = useUser();
+  const { isSignedIn, user } = useUser();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const initialTab = TAB_QUERY_VALUES[searchParams.get("tab") ?? ""] ?? "nearby";
   const [status, setStatus] = useState<Status>("idle");
   const [restaurants, setRestaurants] = useState<PlaceResult[]>([]);
   const [errorMessage, setErrorMessage] = useState<string>("");
@@ -40,11 +57,27 @@ export default function HomeClient() {
   const [radiusInput, setRadiusInput] = useState<string>(String(DEFAULT_RADIUS_FT));
   // Map of placeId -> entry; presence in map means the place is saved
   const [savedPlacesData, setSavedPlacesData] = useState<Map<string, SavedPlaceEntry>>(new Map());
-  const [activeTab, setActiveTab] = useState<ActiveTab>("nearby");
+  const [activeTab, setActiveTab] = useState<ActiveTab>(initialTab);
   const [nearbyView, setNearbyView] = useState<NearbyView>("list");
-  const [selectedPlace, setSelectedPlace] = useState<PlaceResult | null>(null);
   const [showAbout, setShowAbout] = useState(false);
   const radiusFtRef = useRef<number>(DEFAULT_RADIUS_FT);
+
+  // Split saved places into "Been" (has at least one visit) and "Potential" (no visits yet)
+  const beenPlacesData = useMemo(() => {
+    const map = new Map<string, SavedPlaceEntry>();
+    for (const [id, entry] of savedPlacesData) {
+      if (entry.visits.length > 0) map.set(id, entry);
+    }
+    return map;
+  }, [savedPlacesData]);
+
+  const potentialPlacesData = useMemo(() => {
+    const map = new Map<string, SavedPlaceEntry>();
+    for (const [id, entry] of savedPlacesData) {
+      if (entry.visits.length === 0) map.set(id, entry);
+    }
+    return map;
+  }, [savedPlacesData]);
 
   const fetchRestaurants = useCallback(
     async (lat: number, lng: number, radius: number) => {
@@ -112,27 +145,51 @@ export default function HomeClient() {
     else setSavedPlacesData(new Map());
   }, [isSignedIn, fetchSavedPlaces]);
 
+  const { status: pushStatus } = usePushSubscription();
+  useDwellReminder({
+    enabled: !!isSignedIn && pushStatus === "subscribed",
+    userId: user?.id ?? null,
+    savedPlacesData,
+  });
+
   const handleSaveToggle = useCallback(async (
     placeId: string,
     save: boolean,
     restaurantOverride?: PlaceResult
   ) => {
+    // For saving we need restaurant metadata (from nearby results or override).
+    // For deleting we only need the placeId, so fall back to the existing saved entry
+    // (which is the only thing available when removing from the Been/Potential tabs).
     const restaurant = restaurantOverride ?? restaurants.find((r) => r.place_id === placeId);
-    if (!restaurant) return;
+    const existingEntry = savedPlacesData.get(placeId);
 
-    // Optimistic update
-    setSavedPlacesData((prev) => {
-      const next = new Map(prev);
-      if (save) {
-        next.set(placeId, {
+    if (save && !restaurant) {
+      console.warn("[handleSaveToggle] Cannot save: restaurant metadata not found", { placeId });
+      return;
+    }
+    if (!save && !restaurant && !existingEntry) {
+      console.warn("[handleSaveToggle] Cannot delete: no metadata or existing entry", { placeId });
+      return;
+    }
+
+    // Snapshot for restoring on failure
+    const snapshotEntry: SavedPlaceEntry | null = restaurant
+      ? {
           name: restaurant.name,
           vicinity: restaurant.vicinity ?? null,
           city: restaurant.city ?? null,
           state: restaurant.state ?? null,
           country: restaurant.country ?? null,
-          visits: [],
-        });
-      } else {
+          visits: existingEntry?.visits ?? [],
+        }
+      : existingEntry ?? null;
+
+    // Optimistic update
+    setSavedPlacesData((prev) => {
+      const next = new Map(prev);
+      if (save && snapshotEntry) {
+        next.set(placeId, snapshotEntry);
+      } else if (!save) {
         next.delete(placeId);
       }
       return next;
@@ -140,7 +197,7 @@ export default function HomeClient() {
 
     try {
       let res: Response;
-      if (save) {
+      if (save && restaurant) {
         res = await fetch("/api/places", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -156,27 +213,35 @@ export default function HomeClient() {
       } else {
         res = await fetch(`/api/places?placeId=${encodeURIComponent(placeId)}`, { method: "DELETE" });
       }
-      if (!res.ok) throw new Error("Server error");
-    } catch {
-      // Revert optimistic update on failure
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        console.error("[handleSaveToggle] Server returned non-OK status", {
+          placeId,
+          action: save ? "save" : "delete",
+          status: res.status,
+          statusText: res.statusText,
+          body: text,
+        });
+        throw new Error(`Server error ${res.status}`);
+      }
+    } catch (err) {
+      console.error("[handleSaveToggle] Request failed, reverting optimistic update", {
+        placeId,
+        action: save ? "save" : "delete",
+        error: err instanceof Error ? err.message : String(err),
+      });
       setSavedPlacesData((prev) => {
         const next = new Map(prev);
         if (save) {
           next.delete(placeId);
-        } else {
-          next.set(placeId, {
-            name: restaurant.name,
-            vicinity: restaurant.vicinity ?? null,
-            city: restaurant.city ?? null,
-            state: restaurant.state ?? null,
-            country: restaurant.country ?? null,
-            visits: [],
-          });
+        } else if (snapshotEntry) {
+          next.set(placeId, snapshotEntry);
         }
         return next;
       });
+      throw err;
     }
-  }, [restaurants]);
+  }, [restaurants, savedPlacesData]);
 
   const handleAddVisit = useCallback(async (
     placeId: string,
@@ -330,8 +395,17 @@ export default function HomeClient() {
   const metersToFeet = (m: number) => m * 3.28084;
   const isBusy = status === "locating" || status === "loading";
 
+  const navigateToPlace = useCallback(
+    (from: "nearby" | "search") => (restaurant: PlaceResult) => {
+      router.push(`/place/${encodeURIComponent(restaurant.place_id)}?from=${from}`);
+    },
+    [router]
+  );
+
   return (
     <div className="min-h-screen bg-gray-50">
+      {isSignedIn && <PwaInstallPrompt />}
+      {isSignedIn && <EnableRemindersBanner />}
       {/* Header */}
       <header className="bg-white border-b border-gray-200 sticky top-0 z-10 shadow-sm">
         <div className="max-w-2xl mx-auto px-4 py-4 flex items-center justify-between">
@@ -439,7 +513,7 @@ export default function HomeClient() {
         )}
 
         {/* Tab navigation */}
-        <div className="max-w-2xl mx-auto px-4 flex border-t border-gray-100">
+        <div className="max-w-2xl mx-auto px-4 flex border-t border-gray-100 overflow-x-auto">
           <button
             onClick={() => setActiveTab("nearby")}
             className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px ${
@@ -452,26 +526,44 @@ export default function HomeClient() {
             Nearby
           </button>
           <button
-            onClick={() => setActiveTab("saved")}
+            onClick={() => setActiveTab("been")}
             className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px ${
-              activeTab === "saved"
+              activeTab === "been"
                 ? "border-blue-600 text-blue-600"
                 : "border-transparent text-gray-500 hover:text-gray-700"
             }`}
           >
             <BookmarkTabIcon />
-            Saved
-            {savedPlacesData.size > 0 && (
+            Been
+            {beenPlacesData.size > 0 && (
               <span className={`text-xs font-semibold px-1.5 py-0.5 rounded-full ${
-                activeTab === "saved" ? "bg-blue-100 text-blue-600" : "bg-gray-100 text-gray-500"
+                activeTab === "been" ? "bg-blue-100 text-blue-600" : "bg-gray-100 text-gray-500"
               }`}>
-                {savedPlacesData.size}
+                {beenPlacesData.size}
+              </span>
+            )}
+          </button>
+          <button
+            onClick={() => setActiveTab("potential")}
+            className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px ${
+              activeTab === "potential"
+                ? "border-blue-600 text-blue-600"
+                : "border-transparent text-gray-500 hover:text-gray-700"
+            }`}
+          >
+            <PotentialTabIcon />
+            Potential
+            {potentialPlacesData.size > 0 && (
+              <span className={`text-xs font-semibold px-1.5 py-0.5 rounded-full ${
+                activeTab === "potential" ? "bg-blue-100 text-blue-600" : "bg-gray-100 text-gray-500"
+              }`}>
+                {potentialPlacesData.size}
               </span>
             )}
           </button>
           <button
             onClick={() => setActiveTab("search")}
-            className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px ${
+            className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px whitespace-nowrap ${
               activeTab === "search"
                 ? "border-blue-600 text-blue-600"
                 : "border-transparent text-gray-500 hover:text-gray-700"
@@ -479,6 +571,17 @@ export default function HomeClient() {
           >
             <SearchTabIcon />
             Search
+          </button>
+          <button
+            onClick={() => setActiveTab("place-search")}
+            className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px whitespace-nowrap ${
+              activeTab === "place-search"
+                ? "border-blue-600 text-blue-600"
+                : "border-transparent text-gray-500 hover:text-gray-700"
+            }`}
+          >
+            <PlaceSearchTabIcon />
+            Place Search
           </button>
         </div>
       </header>
@@ -604,7 +707,7 @@ export default function HomeClient() {
                     isSaved={savedPlacesData.has(r.place_id)}
                     isSignedIn={!!isSignedIn}
                     visits={savedPlacesData.get(r.place_id)?.visits ?? []}
-                    onCardClick={setSelectedPlace}
+                    onCardClick={navigateToPlace("nearby")}
                     onSaveToggle={handleSaveToggle}
                     onAddVisit={handleAddVisit}
                     onEditVisit={handleEditVisit}
@@ -620,9 +723,22 @@ export default function HomeClient() {
           </>
         )}
 
-        {activeTab === "saved" && (
+        {activeTab === "been" && (
           <SavedPlacesTab
-            savedPlaces={savedPlacesData}
+            variant="been"
+            savedPlaces={beenPlacesData}
+            isSignedIn={!!isSignedIn}
+            onSaveToggle={handleSaveToggle}
+            onAddVisit={handleAddVisit}
+            onEditVisit={handleEditVisit}
+            onDeleteVisit={handleDeleteVisit}
+          />
+        )}
+
+        {activeTab === "potential" && (
+          <SavedPlacesTab
+            variant="potential"
+            savedPlaces={potentialPlacesData}
             isSignedIn={!!isSignedIn}
             onSaveToggle={handleSaveToggle}
             onAddVisit={handleAddVisit}
@@ -639,17 +755,21 @@ export default function HomeClient() {
             onAddVisit={handleAddVisit}
             onEditVisit={handleEditVisit}
             onDeleteVisit={handleDeleteVisit}
-            onCardClick={setSelectedPlace}
+            onCardClick={navigateToPlace("search")}
+          />
+        )}
+
+        {activeTab === "place-search" && (
+          <PlaceSearchTab
+            isSignedIn={!!isSignedIn}
+            savedPlacesData={savedPlacesData}
+            onSaveToggle={handleSaveToggle}
+            onAddVisit={handleAddVisit}
+            onEditVisit={handleEditVisit}
+            onDeleteVisit={handleDeleteVisit}
           />
         )}
       </main>
-
-      {selectedPlace && (
-        <PlaceDetailModal
-          place={selectedPlace}
-          onClose={() => setSelectedPlace(null)}
-        />
-      )}
 
       {showAbout && <AboutModal onClose={() => setShowAbout(false)} />}
     </div>
@@ -725,10 +845,28 @@ function BookmarkTabIcon() {
   );
 }
 
+function PotentialTabIcon() {
+  return (
+    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 2l2.39 4.84L20 8l-4 3.9.94 5.5L12 14.77 7.06 17.4 8 11.9 4 8l5.61-1.16L12 2z" />
+    </svg>
+  );
+}
+
 function SearchTabIcon() {
   return (
     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
+    </svg>
+  );
+}
+
+function PlaceSearchTabIcon() {
+  return (
+    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+      <circle cx="12" cy="11" r="2.5" fill="none" stroke="currentColor" strokeWidth={2} />
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 17.5l3 3M21 19.25a1.75 1.75 0 11-3.5 0 1.75 1.75 0 013.5 0z" />
     </svg>
   );
 }

@@ -31,7 +31,26 @@ export const placeVisits = pgTable("place_visits", {
   visitedAt: timestamp("visited_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
+export const pushSubscriptions = pgTable(
+  "push_subscriptions",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    userId: text("user_id").notNull(),
+    endpoint: text("endpoint").notNull(),
+    p256dh: text("p256dh").notNull(),
+    auth: text("auth").notNull(),
+    userAgent: text("user_agent"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [uniqueIndex("push_endpoint_unique").on(t.endpoint)]
+);
+
 export type SavedPlace = typeof savedPlaces.$inferSelect;
 export type NewSavedPlace = typeof savedPlaces.$inferInsert;
 export type PlaceVisit = typeof placeVisits.$inferSelect;
 export type NewPlaceVisit = typeof placeVisits.$inferInsert;
+export type PushSubscriptionRow = typeof pushSubscriptions.$inferSelect;
+export type NewPushSubscription = typeof pushSubscriptions.$inferInsert;

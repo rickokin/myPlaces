@@ -4,6 +4,12 @@ import { NextRequest, NextResponse } from "next/server";
 const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY;
 const DEFAULT_RADIUS_FT = 300;
 const MAX_RADIUS_FT = 52_800; // 10 miles
+const DEFAULT_LIMIT = 20;
+const MAX_LIMIT = 100;
+// Google Places (New) caps each searchText page at 20 and pagination at 3
+// pages for a hard ceiling of 60. searchNearby is hard-capped at 20.
+const SEARCH_TEXT_MAX_PAGES = 3;
+const SEARCH_TEXT_PAGE_SIZE = 20;
 
 // ─── Shared PlaceResult type (imported by other routes and UI components) ───
 
@@ -194,48 +200,33 @@ export async function GET(request: NextRequest) {
     : DEFAULT_RADIUS_FT;
   const radiusMeters = radiusFt * 0.3048;
 
+  const rawLimit = parseInt(searchParams.get("limit") ?? "", 10);
+  const limit = isFinite(rawLimit) && rawLimit > 0
+    ? Math.min(rawLimit, MAX_LIMIT)
+    : DEFAULT_LIMIT;
+
   try {
     // Use a generous search radius so the API returns enough candidates;
     // we then filter to the user's exact radius via Haversine.
     const searchRadiusMeters = Math.max(radiusMeters * 10, 2000);
 
-    const res = await fetch(
-      "https://places.googleapis.com/v1/places:searchNearby",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Goog-Api-Key": GOOGLE_MAPS_API_KEY,
-          "X-Goog-FieldMask": PLACES_FIELD_MASK,
-        },
-        body: JSON.stringify({
-          includedTypes: ["restaurant"],
-          maxResultCount: 20,
-          rankPreference: "DISTANCE",
-          locationRestriction: {
-            circle: {
-              center: {
-                latitude: latNum,
-                longitude: lngNum,
-              },
-              radius: searchRadiusMeters,
-            },
-          },
-        }),
-      }
-    );
-
-    const data = await res.json();
-
-    if (!res.ok) {
-      console.error("[restaurants] Places API error:", JSON.stringify(data));
-      return NextResponse.json(
-        { error: `Places API error: ${data.error?.message ?? res.status}` },
-        { status: 500 }
+    let places: NewPlaceApiResult[];
+    if (limit <= 20) {
+      places = await fetchNearby(
+        GOOGLE_MAPS_API_KEY,
+        latNum,
+        lngNum,
+        searchRadiusMeters
+      );
+    } else {
+      places = await fetchTextSearchPaginated(
+        GOOGLE_MAPS_API_KEY,
+        latNum,
+        lngNum,
+        searchRadiusMeters,
+        limit
       );
     }
-
-    const places: NewPlaceApiResult[] = data.places ?? [];
 
     const detailedPlaces: PlaceResult[] = places.map((place) => {
       const base = mapToPlaceResult(place);
@@ -250,14 +241,117 @@ export async function GET(request: NextRequest) {
 
     const placesInRadius = detailedPlaces
       .filter((p) => (p.distance ?? 0) <= radiusMeters)
-      .sort((a, b) => (a.distance ?? 0) - (b.distance ?? 0));
+      .sort((a, b) => (a.distance ?? 0) - (b.distance ?? 0))
+      .slice(0, limit);
 
     return NextResponse.json({ restaurants: placesInRadius });
   } catch (err) {
     console.error("Error fetching restaurants:", err);
-    return NextResponse.json(
-      { error: "Failed to fetch restaurants" },
-      { status: 500 }
-    );
+    const message = err instanceof Error ? err.message : "Failed to fetch restaurants";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
+}
+
+// Fast path: a single searchNearby call, capped at 20 results by the API.
+async function fetchNearby(
+  apiKey: string,
+  lat: number,
+  lng: number,
+  searchRadiusMeters: number
+): Promise<NewPlaceApiResult[]> {
+  const res = await fetch(
+    "https://places.googleapis.com/v1/places:searchNearby",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Goog-Api-Key": apiKey,
+        "X-Goog-FieldMask": PLACES_FIELD_MASK,
+      },
+      body: JSON.stringify({
+        includedTypes: ["restaurant"],
+        maxResultCount: 20,
+        rankPreference: "DISTANCE",
+        locationRestriction: {
+          circle: {
+            center: { latitude: lat, longitude: lng },
+            radius: searchRadiusMeters,
+          },
+        },
+      }),
+    }
+  );
+
+  const data = await res.json();
+  if (!res.ok) {
+    console.error("[restaurants] searchNearby error:", JSON.stringify(data));
+    throw new Error(`Places API error: ${data.error?.message ?? res.status}`);
+  }
+  return data.places ?? [];
+}
+
+// High-volume path: paginated searchText. Google caps pagination at ~3 pages
+// (60 results); we de-dupe in case of overlap across pages.
+async function fetchTextSearchPaginated(
+  apiKey: string,
+  lat: number,
+  lng: number,
+  searchRadiusMeters: number,
+  limit: number
+): Promise<NewPlaceApiResult[]> {
+  // Text search returns up to 20 per page. The X-Goog-FieldMask must include
+  // top-level `nextPageToken` so pagination works.
+  const fieldMask = `${PLACES_FIELD_MASK},nextPageToken`;
+  const seen = new Map<string, NewPlaceApiResult>();
+  let pageToken: string | undefined;
+
+  const maxPages = Math.min(
+    SEARCH_TEXT_MAX_PAGES,
+    Math.ceil(limit / SEARCH_TEXT_PAGE_SIZE)
+  );
+
+  for (let page = 0; page < maxPages; page++) {
+    const body: Record<string, unknown> = {
+      textQuery: "restaurants",
+      includedType: "restaurant",
+      pageSize: SEARCH_TEXT_PAGE_SIZE,
+      rankPreference: "DISTANCE",
+      locationBias: {
+        circle: {
+          center: { latitude: lat, longitude: lng },
+          radius: searchRadiusMeters,
+        },
+      },
+    };
+    if (pageToken) body.pageToken = pageToken;
+
+    const res = await fetch(
+      "https://places.googleapis.com/v1/places:searchText",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Goog-Api-Key": apiKey,
+          "X-Goog-FieldMask": fieldMask,
+        },
+        body: JSON.stringify(body),
+      }
+    );
+
+    const data = await res.json();
+    if (!res.ok) {
+      console.error("[restaurants] searchText error:", JSON.stringify(data));
+      throw new Error(`Places API error: ${data.error?.message ?? res.status}`);
+    }
+
+    const pagePlaces: NewPlaceApiResult[] = data.places ?? [];
+    for (const p of pagePlaces) {
+      if (p.id && !seen.has(p.id)) seen.set(p.id, p);
+    }
+
+    pageToken = data.nextPageToken;
+    if (!pageToken || seen.size >= limit) break;
+  }
+
+  return Array.from(seen.values());
 }

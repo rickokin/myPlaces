@@ -27,6 +27,10 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: __dirname,
   },
+  // Allow LAN devices (phones for PWA install / push testing) to talk to
+  // the dev server's HMR + asset endpoints. Add additional hosts here as
+  // needed.
+  allowedDevOrigins: ["192.168.0.60"],
   async headers() {
     return [
       {
@@ -40,6 +44,14 @@ const nextConfig: NextConfig = {
             value: "camera=(), microphone=(), geolocation=(self)",
           },
           { key: "Content-Security-Policy", value: cspHeader },
+        ],
+      },
+      {
+        source: "/sw.js",
+        headers: [
+          { key: "Content-Type", value: "application/javascript; charset=utf-8" },
+          { key: "Cache-Control", value: "no-cache, no-store, must-revalidate" },
+          { key: "Service-Worker-Allowed", value: "/" },
         ],
       },
     ];

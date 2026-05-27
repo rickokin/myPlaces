@@ -1,12 +1,42 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { PlaceResult } from "@/app/api/restaurants/route";
 import { Visit } from "@/types";
 import { SavedPlaceEntry } from "@/app/home-client";
 import RestaurantCard from "./RestaurantCard";
 
 type SearchStatus = "idle" | "loading" | "success" | "error";
+
+// Survives navigation to the place detail page (and back) within the same tab.
+const STORAGE_KEY = "searchTab.state.v1";
+
+interface PersistedState {
+  query: string;
+  results: PlaceResult[];
+  lastQuery: string;
+  status: "idle" | "success";
+}
+
+function loadPersisted(): PersistedState | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.sessionStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw) as PersistedState;
+  } catch {
+    return null;
+  }
+}
+
+function persist(state: PersistedState) {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  } catch {
+    // Quota or serialization errors are non-critical.
+  }
+}
 
 interface Props {
   isSignedIn: boolean;
@@ -27,12 +57,25 @@ export default function SearchTab({
   onDeleteVisit,
   onCardClick,
 }: Props) {
-  const [query, setQuery] = useState("");
-  const [results, setResults] = useState<PlaceResult[]>([]);
-  const [status, setStatus] = useState<SearchStatus>("idle");
+  const persisted = useRef<PersistedState | null>(null);
+  if (persisted.current === null) {
+    persisted.current = loadPersisted();
+  }
+  const initial = persisted.current;
+
+  const [query, setQuery] = useState(initial?.query ?? "");
+  const [results, setResults] = useState<PlaceResult[]>(initial?.results ?? []);
+  const [status, setStatus] = useState<SearchStatus>(initial?.status ?? "idle");
   const [errorMessage, setErrorMessage] = useState("");
-  const [lastQuery, setLastQuery] = useState("");
+  const [lastQuery, setLastQuery] = useState(initial?.lastQuery ?? "");
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Persist whenever a stable (idle/success) snapshot changes so the user
+  // returns to the same results when navigating back from a detail page.
+  useEffect(() => {
+    if (status !== "success" && status !== "idle") return;
+    persist({ query, results, lastQuery, status });
+  }, [query, results, lastQuery, status]);
 
   const handleSearch = useCallback(async () => {
     const trimmed = query.trim();
