@@ -1,5 +1,19 @@
 // Client-side helpers for managing the user's push subscription.
 
+// Custom event name dispatched on `window` whenever the push subscription
+// state changes (enable/disable). All `usePushSubscription` hook instances
+// listen for this so multiple consumers stay in sync without a context.
+export const PUSH_STATUS_EVENT = "nearby-eats:push-status-changed";
+
+function notifyStatusChanged() {
+  if (typeof window === "undefined") return;
+  try {
+    window.dispatchEvent(new Event(PUSH_STATUS_EVENT));
+  } catch {
+    // ignore
+  }
+}
+
 function urlBase64ToUint8Array(base64String: string): Uint8Array {
   const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
   const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
@@ -84,6 +98,7 @@ export async function enablePush(): Promise<PushStatus> {
     console.warn("[push-client] Subscribe request failed", res.status);
   }
 
+  notifyStatusChanged();
   return "subscribed";
 }
 
@@ -101,4 +116,5 @@ export async function disablePush(): Promise<void> {
   } catch (err) {
     console.warn("[push-client] disablePush failed", err);
   }
+  notifyStatusChanged();
 }
