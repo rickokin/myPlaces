@@ -33,7 +33,12 @@ export async function POST(req: NextRequest) {
   const now = Date.now();
   const last = lastSentByUser.get(userId) ?? 0;
   if (now - last < COOLDOWN_MS) {
-    return NextResponse.json({ skipped: "cooldown" });
+    const remainingSec = Math.ceil((COOLDOWN_MS - (now - last)) / 1000);
+    console.log("[POST /api/stationary/reminder] cooldown active", {
+      userId,
+      remainingSec,
+    });
+    return NextResponse.json({ skipped: "cooldown", remainingSec });
   }
   lastSentByUser.set(userId, now);
 
@@ -45,10 +50,11 @@ export async function POST(req: NextRequest) {
   try {
     const delivered = await sendPushToUser(userId, {
       title: "Still in the same spot?",
-      body: `You've been stationary for 10 minutes.`,
+      body: `You've been stationary for 2 minutes.`,
       placeId: "stationary",
       url,
     });
+    console.log("[POST /api/stationary/reminder] sent", { userId, delivered });
     return NextResponse.json({ delivered });
   } catch (err) {
     console.error("[POST /api/stationary/reminder] sendPushToUser failed", {

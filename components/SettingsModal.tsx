@@ -68,11 +68,11 @@ export default function SettingsModal({
             />
             <div className="flex-1">
               <p className="text-sm font-medium text-gray-800">
-                Notify me when I&apos;ve been in one place for 10 minutes
+                Notify me when I&apos;ve been in one place for 2 minutes
               </p>
               <p className="text-xs text-gray-500 mt-0.5">
                 In addition to the existing restaurant reminders, get nudged
-                anywhere you stay put for 10+ minutes.
+                anywhere you stay put for 2+ minutes.
               </p>
               {pushWarning && (
                 <p className="text-xs text-amber-700 mt-1.5">{pushWarning}</p>
