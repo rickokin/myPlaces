@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import type { PushStatus } from "@/lib/push-client";
 
 type Props = {
@@ -19,6 +20,33 @@ export default function SettingsModal({
   // reminder hook independently gates on a live push subscription. When push
   // is detected as not ready we show a passive hint instead of disabling the
   // control, since browser/PWA quirks can sometimes report a stale state.
+  const [testState, setTestState] = useState<"idle" | "sending" | "sent" | "error">("idle");
+  const [testMessage, setTestMessage] = useState<string | null>(null);
+
+  const handleSendTest = async () => {
+    setTestState("sending");
+    setTestMessage(null);
+    try {
+      const res = await fetch("/api/push/test", { method: "POST" });
+      const data = (await res.json().catch(() => ({}))) as {
+        delivered?: number;
+        error?: string;
+      };
+      if (!res.ok) {
+        throw new Error(data.error || `Request failed (${res.status})`);
+      }
+      setTestState("sent");
+      setTestMessage(
+        typeof data.delivered === "number"
+          ? `Sent to ${data.delivered} device${data.delivered === 1 ? "" : "s"}.`
+          : "Sent."
+      );
+    } catch (err) {
+      setTestState("error");
+      setTestMessage(err instanceof Error ? err.message : "Failed to send test notification.");
+    }
+  };
+
   const pushWarning =
     pushStatus === "denied"
       ? "Notifications are blocked in your browser. Allow them in browser settings to receive these reminders."
@@ -79,6 +107,34 @@ export default function SettingsModal({
               )}
             </div>
           </label>
+
+          <div className="mt-4 pt-4 border-t border-gray-100">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex-1">
+                <p className="text-sm font-medium text-gray-800">Send Test</p>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  Fire a test push to this account for debugging.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleSendTest}
+                disabled={testState === "sending"}
+                className="text-sm font-medium text-blue-600 hover:text-blue-700 disabled:text-gray-400 disabled:cursor-not-allowed border border-blue-200 hover:border-blue-300 disabled:border-gray-200 rounded-md px-3 py-1.5 transition-colors"
+              >
+                {testState === "sending" ? "Sending..." : "Send Test"}
+              </button>
+            </div>
+            {testMessage && (
+              <p
+                className={`text-xs mt-2 ${
+                  testState === "error" ? "text-red-600" : "text-gray-600"
+                }`}
+              >
+                {testMessage}
+              </p>
+            )}
+          </div>
         </section>
 
         <div className="mt-6 flex justify-end">
