@@ -811,6 +811,7 @@ export default function HomeClient() {
       {showSettings && (
         <SettingsModal
           onClose={() => setShowSettings(false)}
+          pushStatus={pushStatus}
           stationaryRemindersEnabled={stationaryRemindersEnabled}
           onStationaryRemindersChange={handleStationaryRemindersChange}
         />

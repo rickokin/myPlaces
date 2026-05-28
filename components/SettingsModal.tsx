@@ -1,20 +1,24 @@
 "use client";
 
-import { usePushSubscription } from "@/hooks/usePushSubscription";
+import type { PushStatus } from "@/lib/push-client";
 
 type Props = {
   onClose: () => void;
+  pushStatus: PushStatus | "unknown";
   stationaryRemindersEnabled: boolean;
   onStationaryRemindersChange: (enabled: boolean) => void;
 };
 
 export default function SettingsModal({
   onClose,
+  pushStatus,
   stationaryRemindersEnabled,
   onStationaryRemindersChange,
 }: Props) {
-  const { status: pushStatus } = usePushSubscription();
-  const pushReady = pushStatus === "subscribed";
+  // Treat "unknown" (status hasn't finished loading yet) optimistically so the
+  // user isn't blocked by a transient state on first open. We only show the
+  // "enable notifications first" hint when we're certain push isn't ready.
+  const pushReady = pushStatus === "subscribed" || pushStatus === "unknown";
 
   return (
     <div
