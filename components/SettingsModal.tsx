@@ -15,10 +15,18 @@ export default function SettingsModal({
   stationaryRemindersEnabled,
   onStationaryRemindersChange,
 }: Props) {
-  // Treat "unknown" (status hasn't finished loading yet) optimistically so the
-  // user isn't blocked by a transient state on first open. We only show the
-  // "enable notifications first" hint when we're certain push isn't ready.
-  const pushReady = pushStatus === "subscribed" || pushStatus === "unknown";
+  // We let the user toggle the *preference* regardless of push state — the
+  // reminder hook independently gates on a live push subscription. When push
+  // is detected as not ready we show a passive hint instead of disabling the
+  // control, since browser/PWA quirks can sometimes report a stale state.
+  const pushWarning =
+    pushStatus === "denied"
+      ? "Notifications are blocked in your browser. Allow them in browser settings to receive these reminders."
+      : pushStatus === "unsupported"
+        ? "This browser doesn't support push notifications, so reminders can't be delivered here."
+        : pushStatus === "unprompted"
+          ? "Enable notifications (from the banner at the top) to actually receive these reminders."
+          : null;
 
   return (
     <div
@@ -56,8 +64,7 @@ export default function SettingsModal({
               type="checkbox"
               checked={stationaryRemindersEnabled}
               onChange={(e) => onStationaryRemindersChange(e.target.checked)}
-              disabled={!pushReady}
-              className="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 disabled:opacity-50"
+              className="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
             />
             <div className="flex-1">
               <p className="text-sm font-medium text-gray-800">
@@ -67,10 +74,8 @@ export default function SettingsModal({
                 In addition to the existing restaurant reminders, get nudged
                 anywhere you stay put for 10+ minutes.
               </p>
-              {!pushReady && (
-                <p className="text-xs text-amber-700 mt-1.5">
-                  Enable notifications first to use this option.
-                </p>
+              {pushWarning && (
+                <p className="text-xs text-amber-700 mt-1.5">{pushWarning}</p>
               )}
             </div>
           </label>
